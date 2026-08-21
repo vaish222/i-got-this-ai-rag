@@ -100,6 +100,8 @@ The verified run on the controlled corpus produced:
 | 750 | 20 | 0.900 | 2 |
 | 1000 | 20 | 0.900 | 2 |
 
+Based on these results, the selected baseline remains **500-token chunks with a 75-token overlap**. This matches the active environment example and typed configuration defaults.
+
 Run all offline tests with:
 
 ```bash
