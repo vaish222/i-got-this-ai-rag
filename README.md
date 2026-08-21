@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 2 complete
+## Current status: Phase 3 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -33,7 +33,9 @@ Phase 2 adds a repeatable baseline evaluation runner that:
 - calculates macro Recall@5 over the 13 answerable questions; and
 - saves `config.json` and `results.json` with SHA-256 links to the exact dataset and configuration used.
 
-No Phase 3+ work is included: there are no chunking or embedding experiments, hybrid retrieval, reranking, metadata filtering, query rewriting, LangGraph, or UI.
+Phase 3 adds controlled chunk-size experiments for 250, 500, 750, and 1000 tokens. The corpus, 75-token overlap, embedding model, Pinecone index, dense Top-5 retrieval, LLM, and evaluation questions stay fixed. Each configuration uses a dedicated `phase3-*` namespace and records Recall@5, expected-source ranks, latency, and retrieval failures by question category.
+
+No Phase 4+ work is included: there are no embedding-model experiments, sparse or hybrid retrieval, reranking, metadata filtering, query rewriting, LangGraph, or UI.
 
 ## Run the Phase 1 notebook
 
@@ -70,7 +72,35 @@ evaluation/results/E001_dense_baseline/
 
 Generated result directories are intentionally git-ignored because they contain model outputs and can be regenerated. See [evaluation/README.md](evaluation/README.md) for the metric definition and result schema.
 
-Run the offline Phase 2 tests with:
+## Run the Phase 3 chunking experiments
+
+Keep Ollama running and execute:
+
+```bash
+uv run python evaluation/run_chunk_experiments.py
+```
+
+The runner rebuilds only the four namespaces prefixed with `phase3-`; it cannot delete the Phase 1 baseline namespace. It writes one reproducible config/result pair per chunk size plus a cross-experiment comparison:
+
+```text
+evaluation/results/phase3_chunking/
+├── comparison.json
+├── E101_dense_chunk250/{config.json,results.json}
+├── E102_dense_chunk500/{config.json,results.json}
+├── E103_dense_chunk750/{config.json,results.json}
+└── E104_dense_chunk1000/{config.json,results.json}
+```
+
+The verified run on the controlled corpus produced:
+
+| Chunk size | Chunks | Recall@5 | Retrieval failures |
+|---:|---:|---:|---:|
+| 250 | 25 | 0.829 | 4 |
+| 500 | 20 | 0.900 | 2 |
+| 750 | 20 | 0.900 | 2 |
+| 1000 | 20 | 0.900 | 2 |
+
+Run all offline tests with:
 
 ```bash
 PYTHONPATH=src uv run python -m unittest discover -s tests -v
@@ -91,10 +121,17 @@ data/
     ├── social/              # 3
     └── volunteer/           # 2
 
+config/experiments/
+├── chunk_250.yaml
+├── chunk_500.yaml
+├── chunk_750.yaml
+└── chunk_1000.yaml
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
 ├── run_baseline.py          # Phase 2 command-line runner
+├── run_chunk_experiments.py # Phase 3 controlled experiment runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -102,11 +139,14 @@ notebooks/
 
 src/i_got_this_rag/
 ├── baseline.py              # read-only connection to the Phase 1 pipeline
+├── chunk_experiments.py     # experiment config and guarded namespace indexing
 ├── evaluation.py            # metrics, result schema, and persistence
+├── ingestion.py             # reusable Phase 1 loading and chunking behavior
 └── settings.py              # typed environment configuration
 
 tests/
-└── test_phase2_evaluation.py
+├── test_phase2_evaluation.py
+└── test_phase3_chunking.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

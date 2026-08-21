@@ -63,11 +63,10 @@ class Settings:
         if not 0 <= self.chunk_overlap < self.chunk_size:
             raise ValueError("RAG_CHUNK_OVERLAP must be non-negative and smaller than RAG_CHUNK_SIZE.")
         if self.top_k < 5:
-            raise ValueError("RAG_TOP_K must be at least 5 so the Phase 2 runner can calculate Recall@5.")
+            raise ValueError("RAG_TOP_K must be at least 5 so evaluation can calculate Recall@5.")
 
     def public_config(self) -> dict[str, Any]:
         config = asdict(self)
         config["project_root"] = self.project_root.as_posix()
         config["data_dir"] = self.data_dir.as_posix()
         return config
-

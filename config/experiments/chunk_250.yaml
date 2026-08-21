@@ -1,0 +1,6 @@
+experiment_id: E101_dense_chunk250
+experiment_name: Dense retrieval with 250-token chunks
+chunk_size: 250
+chunk_overlap: 75
+pinecone_namespace: phase3-chunk-250
+

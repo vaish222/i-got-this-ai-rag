@@ -64,6 +64,40 @@ expected sources retrieved in ranks 1–5 / total expected sources
 
 The two deliberately unanswerable questions have no expected sources, so their per-question Recall@5 is `null` and they are excluded from the aggregate retrieval metric. Their generated answers, citations, and latencies are still recorded.
 
+## Phase 3 chunk-size experiments
+
+Phase 3 compares exactly four chunk sizes configured in `config/experiments/`:
+
+| Experiment | Chunk size | Overlap | Pinecone namespace |
+|---|---:|---:|---|
+| `E101_dense_chunk250` | 250 | 75 | `phase3-chunk-250` |
+| `E102_dense_chunk500` | 500 | 75 | `phase3-chunk-500` |
+| `E103_dense_chunk750` | 750 | 75 | `phase3-chunk-750` |
+| `E104_dense_chunk1000` | 1000 | 75 | `phase3-chunk-1000` |
+
+Overlap stays fixed so chunk size is the only content variable. The runner also locks the following controlled variables across all four experiments:
+
+- the SHA-256 fingerprint of the same 20 source documents;
+- embedding model and Pinecone index;
+- dense retrieval strategy and Top-K;
+- LLM and prompt behavior; and
+- the SHA-256 fingerprint of the same 15-question evaluation dataset.
+
+Run the suite from the repository root:
+
+```bash
+uv run python evaluation/run_chunk_experiments.py
+```
+
+Each run replaces only namespaces beginning with `phase3-`. A runtime guard rejects any attempt to rebuild the baseline or another unprefixed namespace. The runner writes individual `config.json` and `results.json` files under `evaluation/results/phase3_chunking/`, plus `comparison.json` containing:
+
+- overall Recall@5, expected-source rank, and latency for every chunk size;
+- category-level Recall@5 and latency;
+- failed question IDs and missing expected source IDs grouped by category; and
+- a question-by-question expected-source rank comparison across all four experiments.
+
+The current controlled run found that 500, 750, and 1000 tokens tie at 0.900 Recall@5. The 250-token configuration scored 0.829 because it added cross-document misses on top of the cross-domain failures shared by every configuration. This is a measurement result only; Phase 3 does not change the production baseline based on it.
+
 ## Phase boundary
 
-Phase 2 measures the single Phase 1 baseline only. Chunking experiments, alternate embeddings, sparse or hybrid retrieval, reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.
+Phase 3 varies chunk size only. Alternate embeddings, sparse or hybrid retrieval, reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.

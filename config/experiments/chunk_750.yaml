@@ -1,0 +1,6 @@
+experiment_id: E103_dense_chunk750
+experiment_name: Dense retrieval with 750-token chunks
+chunk_size: 750
+chunk_overlap: 75
+pinecone_namespace: phase3-chunk-750
+

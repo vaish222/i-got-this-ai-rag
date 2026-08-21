@@ -140,6 +140,59 @@ def extract_citations(answer: str, retrieved_chunks: list[dict[str, Any]]) -> li
     return citations
 
 
+def summarize_by_category(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    summaries: dict[str, dict[str, Any]] = {}
+    categories = sorted({str(result["category"]) for result in results})
+    for category in categories:
+        category_results = [result for result in results if result["category"] == category]
+        scored_results = [result for result in category_results if result["recall_at_5"] is not None]
+        expected_ranks = [
+            rank
+            for result in scored_results
+            for rank in result["expected_source_ranks"].values()
+            if rank is not None
+        ]
+        failures: list[dict[str, Any]] = []
+        for result in scored_results:
+            if result["recall_at_5"] >= 1:
+                continue
+            missing_ids = [
+                source_id
+                for source_id, rank in result["expected_source_ranks"].items()
+                if rank is None or rank > 5
+            ]
+            failures.append(
+                {
+                    "question_id": result["question_id"],
+                    "recall_at_5": result["recall_at_5"],
+                    "missing_expected_source_ids": missing_ids,
+                }
+            )
+
+        summaries[category] = {
+            "question_count": len(category_results),
+            "scored_question_count": len(scored_results),
+            "recall_at_5": (
+                mean(result["recall_at_5"] for result in scored_results)
+                if scored_results
+                else None
+            ),
+            "mean_expected_source_rank": mean(expected_ranks) if expected_ranks else None,
+            "retrieval_failure_count": len(failures),
+            "failures": failures,
+            "mean_retrieval_latency_seconds": mean(
+                result["retrieval_latency_seconds"] for result in category_results
+            ),
+            "mean_llm_latency_seconds": mean(
+                result["llm_latency_seconds"] for result in category_results
+            ),
+            "mean_total_latency_seconds": mean(
+                result["total_latency_seconds"] for result in category_results
+            ),
+        }
+    return summaries
+
+
 class BaselineEvaluator:
     def __init__(self, pipeline: RAGPipeline) -> None:
         self.pipeline = pipeline
@@ -185,6 +238,13 @@ class BaselineEvaluator:
         started_at = utc_now()
         results = [self.evaluate_question(question) for question in dataset.questions]
         scored_results = [result for result in results if result["recall_at_5"] is not None]
+        expected_ranks = [
+            rank
+            for result in scored_results
+            for rank in result["expected_source_ranks"].values()
+            if rank is not None
+        ]
+        category_summary = summarize_by_category(results)
         return {
             "schema_version": "1.0",
             "experiment_id": experiment_id,
@@ -203,6 +263,10 @@ class BaselineEvaluator:
                 "question_count": len(results),
                 "recall_at_5": mean(result["recall_at_5"] for result in scored_results),
                 "recall_at_5_question_count": len(scored_results),
+                "mean_expected_source_rank": mean(expected_ranks) if expected_ranks else None,
+                "retrieval_failure_count": sum(
+                    summary["retrieval_failure_count"] for summary in category_summary.values()
+                ),
                 "mean_retrieval_latency_seconds": mean(
                     result["retrieval_latency_seconds"] for result in results
                 ),
@@ -212,6 +276,7 @@ class BaselineEvaluator:
                 ),
                 "mean_total_latency_seconds": mean(result["total_latency_seconds"] for result in results),
             },
+            "category_summary": category_summary,
             "questions": results,
         }
 

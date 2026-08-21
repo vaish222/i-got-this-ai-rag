@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -73,14 +74,18 @@ def format_context(results: list[tuple[Document, float]]) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-class BaselineRAG:
-    """Read-only connection to the Phase 1 dense Pinecone pipeline."""
+@dataclass
+class DenseRAGResources:
+    embeddings: OllamaEmbeddings
+    pinecone_client: Pinecone
+    pinecone_index: Any
+    llm: ChatOllama
 
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
+    @classmethod
+    def connect(cls, settings: Settings) -> "DenseRAGResources":
         api_key = os.getenv("PINECONE_API_KEY", "").strip()
         if not api_key:
-            raise ValueError("PINECONE_API_KEY is required to evaluate the Pinecone baseline.")
+            raise ValueError("PINECONE_API_KEY is required to connect to the Pinecone index.")
 
         available_models = installed_ollama_models(settings.ollama_base_url)
         required_models = {
@@ -92,19 +97,19 @@ class BaselineRAG:
             commands = "\n".join(f"ollama pull {model}" for model in sorted(missing_models))
             raise RuntimeError(f"Download the missing local model(s), then rerun the evaluation:\n{commands}")
 
-        self.embeddings = OllamaEmbeddings(
+        embeddings = OllamaEmbeddings(
             model=settings.embedding_model,
             base_url=settings.ollama_base_url,
         )
-        embedding_dimension = len(self.embeddings.embed_query("dimension probe"))
+        embedding_dimension = len(embeddings.embed_query("dimension probe"))
 
-        self.pinecone_client = Pinecone(api_key=api_key)
-        if not self.pinecone_client.has_index(settings.pinecone_index_name):
+        pinecone_client = Pinecone(api_key=api_key)
+        if not pinecone_client.has_index(settings.pinecone_index_name):
             raise RuntimeError(
                 f"Pinecone index '{settings.pinecone_index_name}' does not exist. "
                 "Run the Phase 1 indexing notebook first."
             )
-        index_description = self.pinecone_client.describe_index(settings.pinecone_index_name)
+        index_description = pinecone_client.describe_index(settings.pinecone_index_name)
         if int(index_description.dimension) != embedding_dimension:
             raise ValueError(
                 f"Pinecone index dimension is {index_description.dimension}, but "
@@ -114,24 +119,42 @@ class BaselineRAG:
         if metric != "cosine":
             raise ValueError(f"The baseline requires cosine similarity, but the index uses '{metric}'.")
 
-        self.pinecone_index = self.pinecone_client.Index(settings.pinecone_index_name)
-        stats = self.pinecone_index.describe_index_stats()
+        pinecone_index = pinecone_client.Index(settings.pinecone_index_name)
+        llm = ChatOllama(
+            model=settings.chat_model,
+            base_url=settings.ollama_base_url,
+            temperature=0,
+        )
+        return cls(
+            embeddings=embeddings,
+            pinecone_client=pinecone_client,
+            pinecone_index=pinecone_index,
+            llm=llm,
+        )
+
+
+class BaselineRAG:
+    """Read-only connection to a configured dense Pinecone namespace."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        resources: DenseRAGResources | None = None,
+    ) -> None:
+        self.settings = settings
+        self.resources = resources or DenseRAGResources.connect(settings)
+        stats = self.resources.pinecone_index.describe_index_stats()
         namespace_stats = stats.namespaces.get(settings.pinecone_namespace)
         if namespace_stats is None or int(namespace_stats.vector_count) == 0:
             raise RuntimeError(
                 f"Pinecone namespace '{settings.pinecone_namespace}' is empty or missing. "
-                "Run the Phase 1 indexing notebook first."
+                "Index that namespace before evaluating it."
             )
 
         self.vector_store = PineconeVectorStore(
-            index=self.pinecone_index,
-            embedding=self.embeddings,
+            index=self.resources.pinecone_index,
+            embedding=self.resources.embeddings,
             namespace=settings.pinecone_namespace,
-        )
-        self.llm = ChatOllama(
-            model=settings.chat_model,
-            base_url=settings.ollama_base_url,
-            temperature=0,
         )
 
     def retrieve(self, question: str) -> list[tuple[Document, float]]:
@@ -147,5 +170,4 @@ class BaselineRAG:
                 "timezone": self.settings.timezone,
             }
         )
-        return message_text(self.llm.invoke(prompt_value).content)
-
+        return message_text(self.resources.llm.invoke(prompt_value).content)
