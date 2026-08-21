@@ -98,6 +98,37 @@ Each run replaces only namespaces beginning with `phase3-`. A runtime guard reje
 
 The current controlled run found that 500, 750, and 1000 tokens tie at 0.900 Recall@5. The 250-token configuration scored 0.829 because it added cross-document misses on top of the cross-domain failures shared by every configuration. This is a measurement result only; Phase 3 does not change the production baseline based on it.
 
+## Phase 4 embedding-model experiments
+
+Phase 4 compares exactly the three local Ollama embedding models required by the PRD:
+
+| Experiment | Model | Dimension | Pinecone index |
+|---|---|---:|---|
+| `E201_dense_all_minilm` | `all-minilm` | 384 | `i-got-this-all-minilm` |
+| `E202_dense_nomic` | `nomic-embed-text` | 768 | `i-got-this-nomic` |
+| `E203_dense_mxbai` | `mxbai-embed-large` | 1024 | `i-got-this-mxbai` |
+
+Dimensions are probed from Ollama at runtime rather than assumed. Each model uses a separate Pinecone cosine index, preventing incompatible vector dimensions from being mixed. Existing indexes are reused only after their dimension and metric are validated.
+
+The following remain identical across all three experiments:
+
+- the SHA-256 fingerprint of the 20-document corpus;
+- the SHA-256 fingerprint of the exact 20-chunk set;
+- 500-token chunks with 75-token overlap;
+- dense Top-5 retrieval;
+- the `gemma3:1b` generation model and grounded prompt; and
+- the SHA-256 fingerprint of the 15-question evaluation dataset.
+
+Run the suite from the repository root:
+
+```bash
+uv run python evaluation/run_embedding_experiments.py
+```
+
+The runner writes individual experiment artifacts and `evaluation/results/phase4_embeddings/comparison.json`. The comparison records Recall@5, source ranks, retrieval latency, category summaries, failure cases, vector dimensions, and question-by-question results.
+
+The current controlled run measured 0.826 Recall@5 for `all-minilm`, 0.867 for `nomic-embed-text`, and 0.873 for `mxbai-embed-large`. `mxbai-embed-large` had the best aggregate recall and the fewest failed questions, although all three models still had incomplete retrieval on both cross-domain questions.
+
 ## Phase boundary
 
-Phase 3 varies chunk size only. Alternate embeddings, sparse or hybrid retrieval, reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.
+Phase 4 varies the local dense embedding model only. Sparse or hybrid retrieval, reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.

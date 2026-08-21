@@ -1,0 +1,6 @@
+experiment_id: E201_dense_all_minilm
+experiment_name: Dense retrieval with all-minilm embeddings
+embedding_model: all-minilm
+pinecone_index_name: i-got-this-all-minilm
+pinecone_namespace: phase4-embedding-500
+

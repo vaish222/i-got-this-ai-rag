@@ -193,6 +193,42 @@ def summarize_by_category(results: list[dict[str, Any]]) -> dict[str, dict[str, 
     return summaries
 
 
+def build_question_comparison(experiment_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not experiment_results:
+        raise ValueError("At least one experiment result is required for comparison.")
+    by_experiment = {
+        result["experiment_id"]: {
+            question["question_id"]: question for question in result["questions"]
+        }
+        for result in experiment_results
+    }
+    comparisons: list[dict[str, Any]] = []
+    for question in experiment_results[0]["questions"]:
+        comparisons.append(
+            {
+                "question_id": question["question_id"],
+                "category": question["category"],
+                "expected_source_ids": question["expected_source_ids"],
+                "experiments": {
+                    experiment_id: {
+                        "recall_at_5": questions[question["question_id"]]["recall_at_5"],
+                        "expected_source_rank": questions[question["question_id"]][
+                            "expected_source_rank"
+                        ],
+                        "expected_source_ranks": questions[question["question_id"]][
+                            "expected_source_ranks"
+                        ],
+                        "retrieval_latency_seconds": questions[question["question_id"]][
+                            "retrieval_latency_seconds"
+                        ],
+                    }
+                    for experiment_id, questions in by_experiment.items()
+                },
+            }
+        )
+    return comparisons
+
+
 class BaselineEvaluator:
     def __init__(self, pipeline: RAGPipeline) -> None:
         self.pipeline = pipeline

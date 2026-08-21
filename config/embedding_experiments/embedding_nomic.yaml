@@ -1,0 +1,6 @@
+experiment_id: E202_dense_nomic
+experiment_name: Dense retrieval with nomic-embed-text embeddings
+embedding_model: nomic-embed-text
+pinecone_index_name: i-got-this-nomic
+pinecone_namespace: phase4-embedding-500
+

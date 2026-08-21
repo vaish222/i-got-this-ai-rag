@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 3 complete
+## Current status: Phase 4 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -35,7 +35,9 @@ Phase 2 adds a repeatable baseline evaluation runner that:
 
 Phase 3 adds controlled chunk-size experiments for 250, 500, 750, and 1000 tokens. The corpus, 75-token overlap, embedding model, Pinecone index, dense Top-5 retrieval, LLM, and evaluation questions stay fixed. Each configuration uses a dedicated `phase3-*` namespace and records Recall@5, expected-source ranks, latency, and retrieval failures by question category.
 
-No Phase 4+ work is included: there are no embedding-model experiments, sparse or hybrid retrieval, reranking, metadata filtering, query rewriting, LangGraph, or UI.
+Phase 4 adds a controlled local embedding-model comparison across `all-minilm`, `nomic-embed-text`, and `mxbai-embed-large`. It reuses the exact selected 500/75 chunk set and creates a separate dimension-compatible Pinecone index for every model.
+
+No Phase 5+ work is included: there is no sparse or hybrid retrieval, reranking, metadata filtering, query rewriting, LangGraph, or UI.
 
 ## Run the Phase 1 notebook
 
@@ -102,6 +104,42 @@ The verified run on the controlled corpus produced:
 
 Based on these results, the selected baseline remains **500-token chunks with a 75-token overlap**. This matches the active environment example and typed configuration defaults.
 
+## Run the Phase 4 embedding experiments
+
+Install the three required local models once:
+
+```bash
+ollama pull all-minilm
+ollama pull nomic-embed-text
+ollama pull mxbai-embed-large
+```
+
+Then run:
+
+```bash
+uv run python evaluation/run_embedding_experiments.py
+```
+
+The runner probes each model's vector dimension and creates or validates three separate cosine indexes. It rebuilds only the namespace prefixed `phase4-` in each index. Output is written to:
+
+```text
+evaluation/results/phase4_embeddings/
+├── comparison.json
+├── E201_dense_all_minilm/{config.json,results.json}
+├── E202_dense_nomic/{config.json,results.json}
+└── E203_dense_mxbai/{config.json,results.json}
+```
+
+The verified controlled run produced:
+
+| Embedding model | Dimension | Recall@5 | Retrieval failures |
+|---|---:|---:|---:|
+| `all-minilm` | 384 | 0.826 | 4 |
+| `nomic-embed-text` | 768 | 0.867 | 3 |
+| `mxbai-embed-large` | 1024 | 0.873 | 2 |
+
+`mxbai-embed-large` has the strongest aggregate Phase 4 result. The active baseline embedding model is not changed automatically; selecting a new production model is a separate decision.
+
 Run all offline tests with:
 
 ```bash
@@ -129,11 +167,17 @@ config/experiments/
 ├── chunk_750.yaml
 └── chunk_1000.yaml
 
+config/embedding_experiments/
+├── embedding_all_minilm.yaml
+├── embedding_nomic.yaml
+└── embedding_mxbai.yaml
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
 ├── run_baseline.py          # Phase 2 command-line runner
 ├── run_chunk_experiments.py # Phase 3 controlled experiment runner
+├── run_embedding_experiments.py # Phase 4 controlled experiment runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -142,13 +186,15 @@ notebooks/
 src/i_got_this_rag/
 ├── baseline.py              # read-only connection to the Phase 1 pipeline
 ├── chunk_experiments.py     # experiment config and guarded namespace indexing
+├── embedding_experiments.py # dimension-safe model/index experiments
 ├── evaluation.py            # metrics, result schema, and persistence
 ├── ingestion.py             # reusable Phase 1 loading and chunking behavior
 └── settings.py              # typed environment configuration
 
 tests/
 ├── test_phase2_evaluation.py
-└── test_phase3_chunking.py
+├── test_phase3_chunking.py
+└── test_phase4_embeddings.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

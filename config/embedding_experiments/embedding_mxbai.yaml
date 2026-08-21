@@ -1,0 +1,6 @@
+experiment_id: E203_dense_mxbai
+experiment_name: Dense retrieval with mxbai-embed-large embeddings
+embedding_model: mxbai-embed-large
+pinecone_index_name: i-got-this-mxbai
+pinecone_namespace: phase4-embedding-500
+

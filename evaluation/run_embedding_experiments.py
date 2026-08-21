@@ -7,17 +7,22 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from langchain_ollama import ChatOllama
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from i_got_this_rag.baseline import BaselineRAG, DenseRAGResources  # noqa: E402
-from i_got_this_rag.chunk_experiments import (  # noqa: E402
-    ChunkExperiment,
-    load_chunk_experiments,
-    rebuild_experiment_namespace,
-    write_comparison,
+from i_got_this_rag.baseline import (  # noqa: E402
+    BaselineRAG,
+    installed_ollama_models,
+)
+from i_got_this_rag.chunk_experiments import write_comparison  # noqa: E402
+from i_got_this_rag.embedding_experiments import (  # noqa: E402
+    EmbeddingExperiment,
+    connect_embedding_resources,
+    load_embedding_experiments,
+    rebuild_embedding_namespace,
 )
 from i_got_this_rag.evaluation import (  # noqa: E402
     BaselineEvaluator,
@@ -29,21 +34,26 @@ from i_got_this_rag.evaluation import (  # noqa: E402
 )
 from i_got_this_rag.ingestion import (  # noqa: E402
     chunk_documents,
+    chunk_fingerprint,
     corpus_fingerprint,
     load_corpus,
 )
 from i_got_this_rag.settings import Settings  # noqa: E402
 
 
+SELECTED_CHUNK_SIZE = 500
+SELECTED_CHUNK_OVERLAP = 75
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the four controlled Phase 3 chunk-size experiments."
+        description="Run the three controlled Phase 4 local embedding-model experiments."
     )
     parser.add_argument(
         "--configs",
         type=Path,
-        default=PROJECT_ROOT / "config" / "experiments",
-        help="Directory containing the four chunk_*.yaml experiment files.",
+        default=PROJECT_ROOT / "config" / "embedding_experiments",
+        help="Directory containing the three embedding_*.yaml experiment files.",
     )
     parser.add_argument(
         "--questions",
@@ -53,16 +63,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=PROJECT_ROOT / "evaluation" / "results" / "phase3_chunking",
+        default=PROJECT_ROOT / "evaluation" / "results" / "phase4_embeddings",
     )
     return parser.parse_args()
 
 
 def experiment_config(
-    experiment: ChunkExperiment,
+    experiment: EmbeddingExperiment,
     settings: Settings,
     dataset: EvaluationDataset,
     corpus: dict[str, Any],
+    chunk_set: dict[str, Any],
+    index_info: dict[str, Any],
     indexing: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -71,13 +83,15 @@ def experiment_config(
         "experiment_name": experiment.experiment_name,
         "created_at": utc_now(),
         "pipeline_phase": 1,
-        "evaluation_phase": 3,
+        "evaluation_phase": 4,
         "vector_store": "pinecone",
         "pinecone_index": settings.pinecone_index_name,
         "pinecone_namespace": settings.pinecone_namespace,
         "pinecone_cloud": settings.pinecone_cloud,
         "pinecone_region": settings.pinecone_region,
+        "pinecone_metric": index_info["pinecone_metric"],
         "embedding_model": settings.embedding_model,
+        "embedding_dimension": index_info["embedding_dimension"],
         "chunk_size": settings.chunk_size,
         "chunk_overlap": settings.chunk_overlap,
         "retrieval_strategy": "dense",
@@ -90,6 +104,7 @@ def experiment_config(
         "timezone": settings.timezone,
         "data_dir": settings.data_dir.as_posix(),
         "corpus": corpus,
+        "chunk_set": chunk_set,
         "evaluation_dataset": {
             "name": dataset.dataset_name,
             "schema_version": dataset.schema_version,
@@ -101,7 +116,7 @@ def experiment_config(
             "path": experiment.config_path.as_posix(),
             "sha256": experiment.config_sha256,
         },
-        "indexing": indexing,
+        "indexing": {**index_info, **indexing},
     }
 
 
@@ -109,17 +124,41 @@ def main() -> None:
     args = parse_args()
     load_dotenv(PROJECT_ROOT / ".env", override=True)
     base_settings = Settings.from_environment(PROJECT_ROOT)
+    if (base_settings.chunk_size, base_settings.chunk_overlap) != (
+        SELECTED_CHUNK_SIZE,
+        SELECTED_CHUNK_OVERLAP,
+    ):
+        raise ValueError(
+            "Phase 4 must use the selected 500-token chunks with 75-token overlap. "
+            "Set RAG_CHUNK_SIZE=500 and RAG_CHUNK_OVERLAP=75."
+        )
+
     dataset = load_evaluation_dataset(args.questions)
-    experiments = load_chunk_experiments(args.configs, base_settings.pinecone_namespace)
+    experiments = load_embedding_experiments(args.configs)
+    required_models = {
+        *(experiment.embedding_model.removesuffix(":latest") for experiment in experiments),
+        base_settings.chat_model.removesuffix(":latest"),
+    }
+    available_models = installed_ollama_models(base_settings.ollama_base_url)
+    missing_models = required_models - available_models
+    if missing_models:
+        commands = "\n".join(f"ollama pull {model}" for model in sorted(missing_models))
+        raise RuntimeError(f"Download the missing local model(s), then rerun Phase 4:\n{commands}")
+
     corpus = corpus_fingerprint(base_settings.data_dir, PROJECT_ROOT)
     if corpus["document_count"] != 20:
         raise ValueError(
-            f"Phase 3 requires the controlled 20-document corpus; found {corpus['document_count']}."
+            f"Phase 4 requires the controlled 20-document corpus; found {corpus['document_count']}."
         )
     documents = load_corpus(base_settings.data_dir, PROJECT_ROOT)
+    chunks = chunk_documents(documents, SELECTED_CHUNK_SIZE, SELECTED_CHUNK_OVERLAP)
+    chunk_set = chunk_fingerprint(chunks)
+    shared_llm = ChatOllama(
+        model=base_settings.chat_model,
+        base_url=base_settings.ollama_base_url,
+        temperature=0,
+    )
 
-    print("Connecting to the fixed Ollama and Pinecone resources...")
-    resources = DenseRAGResources.connect(base_settings)
     output_root = args.output_root.resolve()
     completed_results: list[dict[str, Any]] = []
     comparison_rows: list[dict[str, Any]] = []
@@ -127,34 +166,42 @@ def main() -> None:
     for experiment in experiments:
         settings = replace(
             base_settings,
-            chunk_size=experiment.chunk_size,
-            chunk_overlap=experiment.chunk_overlap,
+            embedding_model=experiment.embedding_model,
+            pinecone_index_name=experiment.pinecone_index_name,
             pinecone_namespace=experiment.pinecone_namespace,
         )
         settings.validate()
         print(
-            f"[{experiment.experiment_id}] Chunking at {settings.chunk_size} tokens "
-            f"with {settings.chunk_overlap} overlap..."
+            f"[{experiment.experiment_id}] Connecting {experiment.embedding_model} "
+            f"to {experiment.pinecone_index_name}..."
         )
-        chunks = chunk_documents(documents, settings.chunk_size, settings.chunk_overlap)
-        indexing = rebuild_experiment_namespace(resources, experiment, chunks)
+        resources, index_info = connect_embedding_resources(settings, experiment, shared_llm)
+        indexing = rebuild_embedding_namespace(resources, experiment, chunks)
         indexing["source_document_count"] = corpus["document_count"]
         indexing["chunk_count"] = len(chunks)
 
         print(f"[{experiment.experiment_id}] Evaluating all {len(dataset.questions)} questions...")
         pipeline = BaselineRAG(settings, resources=resources)
         results = BaselineEvaluator(pipeline).run(dataset, experiment.experiment_id)
-        config = experiment_config(experiment, settings, dataset, corpus, indexing)
+        config = experiment_config(
+            experiment,
+            settings,
+            dataset,
+            corpus,
+            chunk_set,
+            index_info,
+            indexing,
+        )
         experiment_directory = output_root / experiment.experiment_id
         config_path, results_path = write_experiment(experiment_directory, config, results)
         completed_results.append(results)
         comparison_rows.append(
             {
                 "experiment_id": experiment.experiment_id,
-                "chunk_size": experiment.chunk_size,
-                "chunk_overlap": experiment.chunk_overlap,
+                "embedding_model": experiment.embedding_model,
+                "embedding_dimension": index_info["embedding_dimension"],
+                "pinecone_index": experiment.pinecone_index_name,
                 "pinecone_namespace": experiment.pinecone_namespace,
-                "chunk_count": len(chunks),
                 "indexing_latency_seconds": indexing["indexing_latency_seconds"],
                 **results["summary"],
                 "category_summary": results["category_summary"],
@@ -167,16 +214,17 @@ def main() -> None:
     best_recall = max(row["recall_at_5"] for row in comparison_rows)
     comparison = {
         "schema_version": "1.0",
-        "phase": 3,
-        "experiment_suite": "controlled_chunk_size_comparison",
+        "phase": 4,
+        "experiment_suite": "controlled_embedding_model_comparison",
         "completed_at": utc_now(),
-        "varied_parameters": ["chunk_size", "pinecone_namespace"],
-        "overlap_policy": "Fixed at 75 tokens so chunk size is the only content variable.",
+        "varied_parameters": ["embedding_model", "pinecone_index", "embedding_dimension"],
         "controlled_variables": {
             "corpus_sha256": corpus["sha256"],
             "document_count": corpus["document_count"],
-            "embedding_model": base_settings.embedding_model,
-            "pinecone_index": base_settings.pinecone_index_name,
+            "chunk_set_sha256": chunk_set["sha256"],
+            "chunk_count": chunk_set["chunk_count"],
+            "chunk_size": SELECTED_CHUNK_SIZE,
+            "chunk_overlap": SELECTED_CHUNK_OVERLAP,
             "retrieval_strategy": "dense",
             "top_k": base_settings.top_k,
             "llm_model": base_settings.chat_model,
@@ -196,3 +244,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

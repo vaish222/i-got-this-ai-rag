@@ -148,3 +148,22 @@ def chunk_documents(
         raise ValueError("Chunking produced no content.")
     return chunks
 
+
+def chunk_fingerprint(chunks: list[Document]) -> dict[str, Any]:
+    manifest = [
+        {
+            "chunk_id": str(chunk.metadata["chunk_id"]),
+            "document_id": str(chunk.metadata["document_id"]),
+            "content_sha256": hashlib.sha256(chunk.page_content.encode()).hexdigest(),
+        }
+        for chunk in chunks
+    ]
+    canonical = "\n".join(
+        f"{item['chunk_id']}:{item['document_id']}:{item['content_sha256']}" for item in manifest
+    ).encode()
+    return {
+        "chunk_count": len(manifest),
+        "sha256": hashlib.sha256(canonical).hexdigest(),
+        "chunks": manifest,
+    }
+
