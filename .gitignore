@@ -1,7 +1,7 @@
 # Secrets
 .env
 
-# Private knowledge and local vector storage
+# Private knowledge and legacy local vector storage
 data/private/*
 !data/private/.gitkeep
 qdrant_storage/
