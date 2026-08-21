@@ -1,0 +1,5 @@
+experiment_id: E301_dense
+experiment_name: Dense semantic retrieval
+retrieval_strategy: dense
+pinecone_namespace: phase5-retrieval-500
+

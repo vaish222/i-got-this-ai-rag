@@ -1,0 +1,5 @@
+experiment_id: E303_hybrid
+experiment_name: Hybrid dense and sparse retrieval with reciprocal-rank fusion
+retrieval_strategy: hybrid
+pinecone_namespace: phase5-retrieval-500
+

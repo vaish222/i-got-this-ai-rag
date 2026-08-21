@@ -74,6 +74,24 @@ def format_context(results: list[tuple[Document, float]]) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
+def generate_grounded_answer(
+    settings: Settings,
+    llm: Any,
+    question: str,
+    results: list[tuple[Document, float]],
+) -> str:
+    prompt_value = RAG_PROMPT.invoke(
+        {
+            "question": question,
+            "context": format_context(results),
+            "refusal_text": REFUSAL_TEXT,
+            "reference_date": settings.reference_date,
+            "timezone": settings.timezone,
+        }
+    )
+    return message_text(llm.invoke(prompt_value).content)
+
+
 @dataclass
 class DenseRAGResources:
     embeddings: OllamaEmbeddings
@@ -161,13 +179,9 @@ class BaselineRAG:
         return self.vector_store.similarity_search_with_score(question, k=self.settings.top_k)
 
     def generate(self, question: str, results: list[tuple[Document, float]]) -> str:
-        prompt_value = RAG_PROMPT.invoke(
-            {
-                "question": question,
-                "context": format_context(results),
-                "refusal_text": REFUSAL_TEXT,
-                "reference_date": self.settings.reference_date,
-                "timezone": self.settings.timezone,
-            }
+        return generate_grounded_answer(
+            self.settings,
+            self.resources.llm,
+            question,
+            results,
         )
-        return message_text(self.resources.llm.invoke(prompt_value).content)

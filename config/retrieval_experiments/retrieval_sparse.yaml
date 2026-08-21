@@ -1,0 +1,5 @@
+experiment_id: E302_sparse
+experiment_name: Sparse BM25 lexical retrieval
+retrieval_strategy: sparse
+pinecone_namespace: phase5-retrieval-500
+

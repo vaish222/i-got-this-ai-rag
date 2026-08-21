@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 4 complete
+## Current status: Phase 5 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -37,7 +37,9 @@ Phase 3 adds controlled chunk-size experiments for 250, 500, 750, and 1000 token
 
 Phase 4 adds a controlled local embedding-model comparison across `all-minilm`, `nomic-embed-text`, and `mxbai-embed-large`. It reuses the exact selected 500/75 chunk set and creates a separate dimension-compatible Pinecone index for every model.
 
-No Phase 5+ work is included: there is no sparse or hybrid retrieval, reranking, metadata filtering, query rewriting, LangGraph, or UI.
+Phase 5 adds configurable dense, sparse BM25, and hybrid reciprocal-rank-fusion retrieval. All three strategies use the same 20 chunks, `embeddinggemma` dense model, Top-5 output, `gemma3:1b` generation model, prompt, and evaluation dataset.
+
+No Phase 6+ work is included: there is no candidate reranking, metadata filtering, query rewriting, LangGraph, or UI.
 
 ## Run the Phase 1 notebook
 
@@ -140,6 +142,36 @@ The verified controlled run produced:
 
 `mxbai-embed-large` has the strongest aggregate Phase 4 result. The active baseline embedding model is not changed automatically; selecting a new production model is a separate decision.
 
+## Run the Phase 5 retrieval experiments
+
+Keep Ollama running and execute:
+
+```bash
+uv run python evaluation/run_retrieval_experiments.py
+```
+
+Dense retrieval uses Pinecone, sparse retrieval uses a deterministic local BM25 index, and hybrid retrieval combines their Top-5 rankings with reciprocal-rank fusion. The final result count remains five for every strategy; Phase 5 does not retrieve 20 candidates or rerank them.
+
+The runner rebuilds only the dedicated `phase5-*` dense namespace and writes:
+
+```text
+evaluation/results/phase5_retrieval/
+├── comparison.json
+├── E301_dense/{config.json,results.json}
+├── E302_sparse/{config.json,results.json}
+└── E303_hybrid/{config.json,results.json}
+```
+
+The verified controlled run produced:
+
+| Strategy | Recall@5 | Exact | Semantic | Date/deadline | Cross-document | Cross-domain |
+|---|---:|---:|---:|---:|---:|---:|
+| Dense | **0.900** | 1.000 | 1.000 | 1.000 | 1.000 | **0.350** |
+| Sparse BM25 | 0.738 | 1.000 | 0.722 | 1.000 | 0.667 | 0.050 |
+| Hybrid RRF | 0.840 | 1.000 | 1.000 | 1.000 | 0.833 | 0.125 |
+
+Dense retrieval remains the best production strategy for this corpus. Hybrid improves the mean expected-source rank for exact lookups from 1.50 to 1.25, but its lexical influence displaces too much cross-domain evidence at Top-5.
+
 Run all offline tests with:
 
 ```bash
@@ -172,12 +204,18 @@ config/embedding_experiments/
 ├── embedding_nomic.yaml
 └── embedding_mxbai.yaml
 
+config/retrieval_experiments/
+├── retrieval_dense.yaml
+├── retrieval_sparse.yaml
+└── retrieval_hybrid.yaml
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
 ├── run_baseline.py          # Phase 2 command-line runner
 ├── run_chunk_experiments.py # Phase 3 controlled experiment runner
 ├── run_embedding_experiments.py # Phase 4 controlled experiment runner
+├── run_retrieval_experiments.py # Phase 5 controlled experiment runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -189,12 +227,15 @@ src/i_got_this_rag/
 ├── embedding_experiments.py # dimension-safe model/index experiments
 ├── evaluation.py            # metrics, result schema, and persistence
 ├── ingestion.py             # reusable Phase 1 loading and chunking behavior
+├── retrieval.py             # dense, BM25, and RRF retrieval strategies
+├── retrieval_experiments.py # Phase 5 config and guarded indexing
 └── settings.py              # typed environment configuration
 
 tests/
 ├── test_phase2_evaluation.py
 ├── test_phase3_chunking.py
-└── test_phase4_embeddings.py
+├── test_phase4_embeddings.py
+└── test_phase5_retrieval.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

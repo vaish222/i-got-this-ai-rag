@@ -85,17 +85,18 @@ def serialize_retrieval(results: list[tuple[Document, float]]) -> list[dict[str,
     retrieved_chunks: list[dict[str, Any]] = []
     for rank, (document, score) in enumerate(results, start=1):
         metadata = document.metadata
-        retrieved_chunks.append(
-            {
-                "rank": rank,
-                "document_id": metadata.get("document_id"),
-                "document_title": metadata.get("document_title"),
-                "chunk_id": metadata.get("chunk_id"),
-                "source_path": metadata.get("source_path"),
-                "page_number": metadata.get("page_number"),
-                "similarity_score": float(score),
-            }
-        )
+        serialized = {
+            "rank": rank,
+            "document_id": metadata.get("document_id"),
+            "document_title": metadata.get("document_title"),
+            "chunk_id": metadata.get("chunk_id"),
+            "source_path": metadata.get("source_path"),
+            "page_number": metadata.get("page_number"),
+            "similarity_score": float(score),
+        }
+        if metadata.get("retrieval_components") is not None:
+            serialized["retrieval_components"] = metadata["retrieval_components"]
+        retrieved_chunks.append(serialized)
     return retrieved_chunks
 
 

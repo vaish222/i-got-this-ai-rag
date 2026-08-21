@@ -129,6 +129,33 @@ The runner writes individual experiment artifacts and `evaluation/results/phase4
 
 The current controlled run measured 0.826 Recall@5 for `all-minilm`, 0.867 for `nomic-embed-text`, and 0.873 for `mxbai-embed-large`. `mxbai-embed-large` had the best aggregate recall and the fewest failed questions, although all three models still had incomplete retrieval on both cross-domain questions.
 
+## Phase 5 retrieval-strategy experiments
+
+Phase 5 compares three configurable retrieval strategies:
+
+- **Dense:** cosine similarity over `embeddinggemma` vectors in the controlled Pinecone namespace.
+- **Sparse:** local Okapi BM25 lexical scoring with `k1=1.5` and `b=0.75`.
+- **Hybrid:** reciprocal-rank fusion of the dense Top-5 and sparse Top-5 using `rrf_k=60`, returning a final Top-5.
+
+The sparse index is deliberately local and deterministic; it operates on the exact same chunks sent to Pinecone and adds no new hosted service or dependency. Hybrid result records include the dense and sparse component ranks that produced each fused rank.
+
+The following remain identical across the experiments:
+
+- the SHA-256 fingerprints of the 20-document corpus and 20-chunk set;
+- 500-token chunks with 75-token overlap;
+- the `embeddinggemma` dense embedding model and Pinecone index;
+- final Top-K of five;
+- the `gemma3:1b` generation model and grounded prompt; and
+- the SHA-256 fingerprint of the 15-question evaluation dataset.
+
+Run the suite from the repository root:
+
+```bash
+uv run python evaluation/run_retrieval_experiments.py
+```
+
+The current run measured 0.900 Recall@5 for dense retrieval, 0.738 for sparse BM25, and 0.840 for hybrid RRF. All strategies achieved perfect exact-lookup and date/deadline recall. Hybrid improved exact-lookup mean expected-source rank, but both lexical strategies performed substantially worse on cross-domain questions. Dense therefore remains the selected retrieval strategy for this controlled corpus.
+
 ## Phase boundary
 
-Phase 4 varies the local dense embedding model only. Sparse or hybrid retrieval, reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.
+Phase 5 varies retrieval strategy only. Candidate expansion and reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.
