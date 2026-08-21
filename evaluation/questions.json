@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "dataset_name": "I Got This — What's Next? Phase 0 Evaluation",
+  "reference_date": "2026-08-20",
+  "timezone": "America/Los_Angeles",
+  "questions": [
+    {
+      "question_id": "Q001",
+      "question": "What time does Saturday's activity start?",
+      "expected_answer": "Saturday's swim practice for child_01 starts at 9:00 AM on August 22, 2026. The swimmer should arrive at 8:45 AM for deck check-in.",
+      "expected_source_ids": ["activities_001"],
+      "expected_sources": ["August Swim Team Schedule"],
+      "category": "exact_lookup",
+      "answerable": true
+    },
+    {
+      "question_id": "Q002",
+      "question": "What should students bring for the field trip?",
+      "expected_answer": "For the Grade 3 Riverside Science Center field trip, child_02 should bring a disposable nut-free lunch, a refillable water bottle, and a sun hat, and wear closed-toe shoes. The school provides the field-trip T-shirt, and students should not bring money.",
+      "expected_source_ids": ["school_003"],
+      "expected_sources": ["Elementary School Family Newsletter — August 2026"],
+      "category": "exact_lookup",
+      "answerable": true
+    },
+    {
+      "question_id": "Q003",
+      "question": "What do we need to bring to the neighborhood potluck?",
+      "expected_answer": "Bring one tray of 24 nut-free lemon bars, a serving spatula, and a printed nut-free ingredient card.",
+      "expected_source_ids": ["social_001", "household_001"],
+      "expected_sources": ["August Invitations and RSVP Tracker", "Family Meal Plan — August 17–23, 2026"],
+      "category": "exact_lookup",
+      "answerable": true
+    },
+    {
+      "question_id": "Q004",
+      "question": "What should we prepare for the beginning of school?",
+      "expected_answer": "Complete child_01's emergency contact verification by August 21 at 5:00 PM, sign child_02's field-trip permission form by August 21, prepare child_02's nut-free lunch, water bottle, sun hat, and closed-toe shoes for the August 24 field trip, plan for Back-to-School Night on August 25, and choose a solid-color picture-day shirt for child_02 by August 25.",
+      "expected_source_ids": ["school_001", "school_003", "school_004"],
+      "expected_sources": ["Middle School Weekly Bulletin — August 17–21, 2026", "Elementary School Family Newsletter — August 2026", "School Events and Forms Tracker"],
+      "category": "semantic",
+      "answerable": true
+    },
+    {
+      "question_id": "Q005",
+      "question": "What responsibilities do I have for volunteer mentoring?",
+      "expected_answer": "Adult_01 must add comments to the mock-interview question list by Friday, August 21 at 6:00 PM, bring two behavioral interview examples to the Saturday, August 22 mentoring call, and enter a session note by Sunday, August 23 at 6:00 PM. The résumé review is already complete.",
+      "expected_source_ids": ["volunteer_001"],
+      "expected_sources": ["Community Mentor Program — August Commitments"],
+      "category": "semantic",
+      "answerable": true
+    },
+    {
+      "question_id": "Q006",
+      "question": "What do I need to complete for my course?",
+      "expected_answer": "For Week 2, adult_01 still needs to write two cleaning risks, two chunk-boundary risks, and a 300–500 word reflection, then export and upload one PDF by August 23 at 11:59 PM Pacific. For the certificate, adult_01 must ultimately complete all four sessions and assignments, score at least 70% on the knowledge check, and submit the capstone proposal by September 10 at 11:59 PM Pacific.",
+      "expected_source_ids": ["learning_002", "learning_003"],
+      "expected_sources": ["Week 2 Assignment — Corpus Audit", "Practical AI Certificate Requirements"],
+      "category": "semantic",
+      "answerable": true
+    },
+    {
+      "question_id": "Q007",
+      "question": "When is elementary picture day?",
+      "expected_answer": "Elementary picture day is Wednesday, August 26, 2026. Child_02's Grade 3 class is scheduled for 10:20 AM.",
+      "expected_source_ids": ["school_003"],
+      "expected_sources": ["Elementary School Family Newsletter — August 2026"],
+      "category": "date_deadline",
+      "answerable": true
+    },
+    {
+      "question_id": "Q008",
+      "question": "When is my next course assignment due?",
+      "expected_answer": "Adult_01's next course assignment, the Week 2 corpus audit, is due Sunday, August 23, 2026 at 11:59 PM Pacific.",
+      "expected_source_ids": ["learning_001", "learning_002"],
+      "expected_sources": ["Practical AI Course Schedule — August 2026", "Week 2 Assignment — Corpus Audit"],
+      "category": "date_deadline",
+      "answerable": true
+    },
+    {
+      "question_id": "Q009",
+      "question": "Which invitations still need an RSVP?",
+      "expected_answer": "The neighborhood potluck still needs an RSVP by Friday, August 21 at noon, and the August 29 dinner with friend_family_02 needs a reply by Monday, August 24 after confirming whether children are included. The August 22 birthday-party RSVP is complete.",
+      "expected_source_ids": ["social_001"],
+      "expected_sources": ["August Invitations and RSVP Tracker"],
+      "category": "date_deadline",
+      "answerable": true
+    },
+    {
+      "question_id": "Q010",
+      "question": "What important school events are coming up?",
+      "expected_answer": "Upcoming school items are the August 21 emergency-contact and field-trip-form deadlines, child_02's August 24 science-center field trip, Back-to-School Night on August 25 from 6:30–8:00 PM, elementary picture day on August 26 at 10:20 AM for child_02, the August 28 sports-registration deadline, and middle school picture day on September 3.",
+      "expected_source_ids": ["school_002", "school_003", "school_004"],
+      "expected_sources": ["Middle School Fall Calendar — 2026", "Elementary School Family Newsletter — August 2026", "School Events and Forms Tracker"],
+      "category": "cross_document",
+      "answerable": true
+    },
+    {
+      "question_id": "Q011",
+      "question": "Which birthdays or social events do I need to prepare for?",
+      "expected_answer": "Buy and wrap the astronomy kit for friend_child_01's August 22 birthday party; RSVP to the August 23 neighborhood potluck by August 21 at noon and prepare the lemon bars, serving spatula, and ingredient card; ask whether children are included and reply to the August 29 dinner by August 24; and mail relative_01's purchased gift and birthday card by August 24 for the August 31 birthday.",
+      "expected_source_ids": ["social_001", "social_002", "social_003"],
+      "expected_sources": ["August Invitations and RSVP Tracker", "Birthdays and Gifts Tracker — August and September", "Social Commitments and Follow-ups"],
+      "category": "cross_document",
+      "answerable": true
+    },
+    {
+      "question_id": "Q012",
+      "question": "What's next for everyone this week?",
+      "expected_answer": "From Thursday, August 20 through Sunday, August 23: adult_01 has class Thursday; Friday includes child_01's math diagnostic, the potluck RSVP deadline, child_02's piano lesson, the emergency-contact deadline, and mentor comments due; Saturday includes the HVAC visit, child_01's swim and robotics, adult_01's mentor call, child_02's birthday party, and evening lemon-bar and course work; Sunday includes child_02's art class, field-trip lunch packing, the neighborhood potluck, the mentor note deadline, and adult_01's course assignment deadline.",
+      "expected_source_ids": ["family_001", "school_004", "activities_001", "activities_003", "learning_002", "volunteer_001", "household_002", "social_001"],
+      "expected_sources": ["Family Schedule — August 17–23, 2026", "School Events and Forms Tracker", "August Swim Team Schedule", "Children's Weekend Classes — Late August", "Week 2 Assignment — Corpus Audit", "Community Mentor Program — August Commitments", "Home Tasks and Maintenance — August", "August Invitations and RSVP Tracker"],
+      "category": "cross_domain",
+      "answerable": true
+    },
+    {
+      "question_id": "Q013",
+      "question": "What do I need to prepare for this weekend across school, kids' activities, learning, volunteering, household, and social commitments?",
+      "expected_answer": "School: sign child_02's field-trip form by Friday and pack the nut-free lunch, water bottle, and sun hat Sunday. Activities: get swim anti-fog drops, pack swim gear, sign the robotics waiver and bring a pencil, and pack art supplies, a smock, and a leaf. Learning: finish the Week 2 risks and reflection, export the PDF, and submit it Sunday. Volunteering: add mentor-list comments Friday, prepare two interview examples, attend Saturday's call, file Sunday's note, and start adult_02's newsletter draft due Monday. Household: replace the HVAC filter before Saturday's visit, buy lemons and powdered sugar, and bake lemon bars. Social: buy and wrap the birthday gift, RSVP to the potluck by Friday noon, and bring the lemon bars, serving spatula, and ingredient card Sunday.",
+      "expected_source_ids": ["school_003", "activities_001", "activities_003", "learning_002", "volunteer_001", "volunteer_002", "household_001", "household_002", "social_001", "social_002"],
+      "expected_sources": ["Elementary School Family Newsletter — August 2026", "August Swim Team Schedule", "Children's Weekend Classes — Late August", "Week 2 Assignment — Corpus Audit", "Community Mentor Program — August Commitments", "Neighborhood Association Content Commitments", "Family Meal Plan — August 17–23, 2026", "Home Tasks and Maintenance — August", "August Invitations and RSVP Tracker", "Birthdays and Gifts Tracker — August and September"],
+      "category": "cross_domain",
+      "answerable": true
+    },
+    {
+      "question_id": "Q014",
+      "question": "When is next year's graduation?",
+      "expected_answer": "I couldn't find information about next year's graduation in your knowledge base.",
+      "expected_source_ids": [],
+      "expected_sources": [],
+      "category": "unanswerable",
+      "answerable": false
+    },
+    {
+      "question_id": "Q015",
+      "question": "What social events do we have scheduled for next summer?",
+      "expected_answer": "I couldn't find information about next summer's social schedule in your knowledge base.",
+      "expected_source_ids": [],
+      "expected_sources": [],
+      "category": "unanswerable",
+      "answerable": false
+    }
+  ]
+}
