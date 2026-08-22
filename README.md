@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 6 complete
+## Current status: Phase 7 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -41,7 +41,9 @@ Phase 5 adds configurable dense, sparse BM25, and hybrid reciprocal-rank-fusion 
 
 Phase 6 adds optional two-stage reranking and compares the selected dense Top-5 baseline against dense Top-20 followed by a deterministic local BM25 candidate reranker and final Top-5. Candidate evidence and latency are recorded separately from reranking outcomes.
 
-No Phase 7+ work is included: there is no metadata filtering, query rewriting, LangGraph, or UI.
+Phase 7 adds optional metadata-aware dense retrieval. A deterministic analyzer extracts high-confidence domain, person, document-type, event-type, date, status, RSVP-status, and gift-status constraints without rewriting the question. Pinecone applies those filters first, then dense fallback fills any remaining Top-5 slots so narrow metadata cannot reduce the evidence count.
+
+No Phase 8+ work is included: there is no query rewriting, LangGraph, or UI.
 
 ## Run the Phase 1 notebook
 
@@ -200,6 +202,34 @@ The verified controlled run produced:
 
 All expected evidence reached the Top-20 candidate set, but BM25 discarded relevant semantic, cross-document, and cross-domain sources. The tested reranker therefore remains disabled and dense Top-5 remains the selected production path.
 
+## Run the Phase 7 metadata experiments
+
+Keep Ollama running and execute:
+
+```bash
+uv run python evaluation/run_metadata_experiments.py
+```
+
+Both experiments search the same metadata-enriched `phase7-*` namespace. The unfiltered experiment performs the selected dense Top-5 search. The filtered experiment analyzes the original question, sends supported constraints as a separate Pinecone metadata filter, and fills short filtered result sets from the unchanged dense query. It does not rewrite or expand the query.
+
+The runner writes:
+
+```text
+evaluation/results/phase7_metadata/
+├── comparison.json
+├── E501_dense_unfiltered/{config.json,results.json}
+└── E502_dense_metadata_filtered/{config.json,results.json}
+```
+
+The verified controlled run produced:
+
+| Configuration | Recall@5 | Mean expected-source rank | Mean retrieval latency | Filters applied |
+|---|---:|---:|---:|---:|
+| Dense Top-5, unfiltered | **0.900** | 2.423 | **194 ms** | 0/15 |
+| Metadata-filtered + dense fallback | **0.900** | **2.385** | 371 ms | 13/15 |
+
+Filtering improved expected-source ordering on three answerable questions, degraded it on four, and left six unchanged; the two unanswerable questions are unscored. It improved cross-document ranking and the overall mean expected-source rank slightly, but exact-lookup and semantic mean ranks became worse. Since it added latency without improving Recall@5, metadata filtering remains available but is not selected as the default retrieval path.
+
 Run all offline tests with:
 
 ```bash
@@ -241,6 +271,10 @@ config/reranking_experiments/
 ├── reranking_disabled.yaml
 └── reranking_bm25.yaml
 
+config/metadata_experiments/
+├── metadata_unfiltered.yaml
+└── metadata_filtered.yaml
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
@@ -249,6 +283,7 @@ evaluation/
 ├── run_embedding_experiments.py # Phase 4 controlled experiment runner
 ├── run_retrieval_experiments.py # Phase 5 controlled experiment runner
 ├── run_reranking_experiments.py # Phase 6 controlled experiment runner
+├── run_metadata_experiments.py # Phase 7 controlled experiment runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -264,6 +299,8 @@ src/i_got_this_rag/
 ├── retrieval_experiments.py # Phase 5 config and guarded indexing
 ├── reranking.py             # optional candidate reranking pipeline
 ├── reranking_experiments.py # Phase 6 config and guarded indexing
+├── metadata_retrieval.py    # Phase 7 facet extraction and filtered dense retrieval
+├── metadata_experiments.py  # Phase 7 config and guarded indexing
 └── settings.py              # typed environment configuration
 
 tests/
@@ -271,7 +308,8 @@ tests/
 ├── test_phase3_chunking.py
 ├── test_phase4_embeddings.py
 ├── test_phase5_retrieval.py
-└── test_phase6_reranking.py
+├── test_phase6_reranking.py
+└── test_phase7_metadata.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

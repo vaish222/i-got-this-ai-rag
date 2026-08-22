@@ -98,6 +98,10 @@ def serialize_retrieval(results: list[tuple[Document, float]]) -> list[dict[str,
             serialized["retrieval_components"] = metadata["retrieval_components"]
         if metadata.get("reranking_components") is not None:
             serialized["reranking_components"] = metadata["reranking_components"]
+        if metadata.get("metadata_retrieval_components") is not None:
+            serialized["metadata_retrieval_components"] = metadata[
+                "metadata_retrieval_components"
+            ]
         retrieved_chunks.append(serialized)
     return retrieved_chunks
 
@@ -190,6 +194,18 @@ def summarize_by_category(results: list[dict[str, Any]]) -> dict[str, dict[str, 
             "mean_reranking_latency_seconds": mean(
                 result.get("reranking_latency_seconds", 0.0) for result in category_results
             ),
+            "metadata_filter_applied_question_count": sum(
+                bool(result.get("metadata_filter_applied", False))
+                for result in category_results
+            ),
+            "metadata_fallback_chunk_count": sum(
+                int(result.get("metadata_fallback_result_count", 0))
+                for result in category_results
+            ),
+            "mean_metadata_analysis_latency_seconds": mean(
+                result.get("metadata_analysis_latency_seconds", 0.0)
+                for result in category_results
+            ),
             "mean_llm_latency_seconds": mean(
                 result["llm_latency_seconds"] for result in category_results
             ),
@@ -235,6 +251,23 @@ def build_question_comparison(experiment_results: list[dict[str, Any]]) -> list[
                             "reranking_latency_seconds",
                             0.0,
                         ),
+                        "metadata_filter_applied": questions[question["question_id"]].get(
+                            "metadata_filter_applied",
+                            False,
+                        ),
+                        "metadata_constraints": questions[question["question_id"]].get(
+                            "metadata_constraints",
+                            {},
+                        ),
+                        "metadata_filter": questions[question["question_id"]].get(
+                            "metadata_filter"
+                        ),
+                        "metadata_filtered_result_count": questions[
+                            question["question_id"]
+                        ].get("metadata_filtered_result_count", 0),
+                        "metadata_fallback_result_count": questions[
+                            question["question_id"]
+                        ].get("metadata_fallback_result_count", 0),
                         "retrieval_latency_seconds": questions[question["question_id"]][
                             "retrieval_latency_seconds"
                         ],
@@ -321,12 +354,34 @@ class BaselineEvaluator:
             candidate_retrieval_latency = float(trace["candidate_retrieval_latency_seconds"])
             reranking_latency = float(trace["reranking_latency_seconds"])
             reranking_enabled = bool(trace["reranking_enabled"])
+            metadata_filter_enabled = bool(trace.get("metadata_filter_enabled", False))
+            metadata_filter_applied = bool(trace.get("metadata_filter_applied", False))
+            metadata_constraints = trace.get("metadata_constraints", {})
+            metadata_filter = trace.get("metadata_filter")
+            metadata_analysis_latency = float(
+                trace.get("metadata_analysis_latency_seconds", 0.0)
+            )
+            metadata_filtered_result_count = int(
+                trace.get("metadata_filtered_result_count", 0)
+            )
+            metadata_fallback_result_count = int(
+                trace.get("metadata_fallback_result_count", 0)
+            )
+            retrieval_query = str(trace.get("retrieval_query", question["question"]))
         else:
             raw_results = self.pipeline.retrieve(str(question["question"]))
             candidate_results = raw_results
             candidate_retrieval_latency = perf_counter() - retrieval_started
             reranking_latency = 0.0
             reranking_enabled = False
+            metadata_filter_enabled = False
+            metadata_filter_applied = False
+            metadata_constraints = {}
+            metadata_filter = None
+            metadata_analysis_latency = 0.0
+            metadata_filtered_result_count = 0
+            metadata_fallback_result_count = 0
+            retrieval_query = str(question["question"])
         retrieval_latency = perf_counter() - retrieval_started
 
         retrieved_chunks = serialize_retrieval(raw_results)
@@ -366,6 +421,14 @@ class BaselineEvaluator:
             "citation_labels": [citation["label"] for citation in citations],
             "citations": citations,
             "reranking_enabled": reranking_enabled,
+            "retrieval_query": retrieval_query,
+            "metadata_filter_enabled": metadata_filter_enabled,
+            "metadata_filter_applied": metadata_filter_applied,
+            "metadata_constraints": metadata_constraints,
+            "metadata_filter": metadata_filter,
+            "metadata_filtered_result_count": metadata_filtered_result_count,
+            "metadata_fallback_result_count": metadata_fallback_result_count,
+            "metadata_analysis_latency_seconds": round(metadata_analysis_latency, 6),
             "candidate_retrieval_latency_seconds": round(candidate_retrieval_latency, 6),
             "reranking_latency_seconds": round(reranking_latency, 6),
             "retrieval_latency_seconds": round(retrieval_latency, 6),
@@ -418,6 +481,15 @@ class BaselineEvaluator:
                 ),
                 "mean_reranking_latency_seconds": mean(
                     result["reranking_latency_seconds"] for result in results
+                ),
+                "metadata_filter_applied_question_count": sum(
+                    result["metadata_filter_applied"] for result in results
+                ),
+                "metadata_fallback_chunk_count": sum(
+                    result["metadata_fallback_result_count"] for result in results
+                ),
+                "mean_metadata_analysis_latency_seconds": mean(
+                    result["metadata_analysis_latency_seconds"] for result in results
                 ),
                 "mean_retrieval_latency_seconds": mean(
                     result["retrieval_latency_seconds"] for result in results

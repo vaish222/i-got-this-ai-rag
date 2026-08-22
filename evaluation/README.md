@@ -181,6 +181,28 @@ Each question result records:
 
 The controlled run found 1.000 candidate recall for dense Top-20, proving that all expected evidence reached the reranker. BM25 then reduced final Recall@5 from 0.900 to 0.738, producing six reranking-failure questions across semantic, cross-document, and cross-domain categories. The reranker is therefore not selected for production.
 
+## Phase 7 metadata-aware retrieval experiments
+
+Phase 7 compares the selected unfiltered dense Top-5 path against metadata-aware dense Top-5 retrieval. The controlled variables remain the 20-document corpus, 500/75 chunks, `embeddinggemma`, Pinecone index, `gemma3:1b`, grounded generation prompt, and 15 evaluation questions.
+
+The metadata-aware path has three deliberately separate operations:
+
+1. A deterministic analyzer extracts high-confidence domain, exact anonymous person ID, document type, event type, event date, general status, RSVP status, and gift status constraints.
+2. Those constraints become Pinecone metadata filters while the semantic query remains byte-for-byte unchanged.
+3. When a filter returns fewer than five chunks, unfiltered dense results fill the remaining slots with chunk-ID deduplication.
+
+The indexed Phase 7 chunks retain the original metadata and add normalized filter facets. Event dates and status facets are extracted conservatively from each chunk; boolean facet keys make multi-value person, event, and status filtering unambiguous in Pinecone.
+
+Run the controlled suite from the repository root:
+
+```bash
+uv run python evaluation/run_metadata_experiments.py
+```
+
+Per-question results record the extracted constraints, exact Pinecone filter, filter and fallback result counts, unchanged retrieval query, metadata-analysis latency, retrieval ranks, answer, citations, and existing latency metrics. `comparison.json` classifies every answerable question as improved, degraded, or unchanged using Recall@5 first and expected-source rank second.
+
+The current run measured identical 0.900 Recall@5 for both paths. Metadata filtering improved expected-source ordering on three answerable questions, degraded four, and left six unchanged. Mean expected-source rank improved slightly from 2.423 to 2.385, while mean retrieval latency rose from 194 ms to 371 ms because filtered searches frequently needed a second dense fallback query. The filtered path remains optional rather than becoming the selected default.
+
 ## Phase boundary
 
-Phase 6 varies candidate count and optional reranking only. Metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.
+Phase 7 implements metadata analysis and filtering only. Query rewriting, multi-query retrieval, LangGraph, and UI work remain intentionally unimplemented.

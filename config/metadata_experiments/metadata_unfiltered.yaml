@@ -1,0 +1,6 @@
+experiment_id: E501_dense_unfiltered
+experiment_name: Dense Top-5 without metadata filters
+metadata_filter_enabled: false
+metadata_analyzer: null
+fallback_to_unfiltered: true
+pinecone_namespace: phase7-metadata-500

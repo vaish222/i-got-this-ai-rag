@@ -1,0 +1,6 @@
+experiment_id: E502_dense_metadata_filtered
+experiment_name: Dense Top-5 with metadata filters and fallback
+metadata_filter_enabled: true
+metadata_analyzer: phase7-rules-v1
+fallback_to_unfiltered: true
+pinecone_namespace: phase7-metadata-500
