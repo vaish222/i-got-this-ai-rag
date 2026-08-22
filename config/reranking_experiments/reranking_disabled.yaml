@@ -1,0 +1,7 @@
+experiment_id: E401_dense_top5
+experiment_name: Dense Top-5 without reranking
+candidate_k: 5
+reranker_enabled: false
+reranker: null
+pinecone_namespace: phase6-reranking-500
+

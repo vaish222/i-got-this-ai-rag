@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 5 complete
+## Current status: Phase 6 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -39,7 +39,9 @@ Phase 4 adds a controlled local embedding-model comparison across `all-minilm`, 
 
 Phase 5 adds configurable dense, sparse BM25, and hybrid reciprocal-rank-fusion retrieval. All three strategies use the same 20 chunks, `embeddinggemma` dense model, Top-5 output, `gemma3:1b` generation model, prompt, and evaluation dataset.
 
-No Phase 6+ work is included: there is no candidate reranking, metadata filtering, query rewriting, LangGraph, or UI.
+Phase 6 adds optional two-stage reranking and compares the selected dense Top-5 baseline against dense Top-20 followed by a deterministic local BM25 candidate reranker and final Top-5. Candidate evidence and latency are recorded separately from reranking outcomes.
+
+No Phase 7+ work is included: there is no metadata filtering, query rewriting, LangGraph, or UI.
 
 ## Run the Phase 1 notebook
 
@@ -172,6 +174,32 @@ The verified controlled run produced:
 
 Dense retrieval remains the best production strategy for this corpus. Hybrid improves the mean expected-source rank for exact lookups from 1.50 to 1.25, but its lexical influence displaces too much cross-domain evidence at Top-5.
 
+## Run the Phase 6 reranking experiments
+
+Keep Ollama running and execute:
+
+```bash
+uv run python evaluation/run_reranking_experiments.py
+```
+
+The runner compares dense Top-5 without reranking against dense Top-20 candidates reranked by local BM25 to a final Top-5. It rebuilds only the dedicated `phase6-*` namespace and writes:
+
+```text
+evaluation/results/phase6_reranking/
+├── comparison.json
+├── E401_dense_top5/{config.json,results.json}
+└── E402_dense_top20_bm25/{config.json,results.json}
+```
+
+The verified controlled run produced:
+
+| Configuration | Candidate recall | Final Recall@5 | Reranking failures | Mean reranking latency |
+|---|---:|---:|---:|---:|
+| Dense Top-5, no reranker | 0.900 | **0.900** | 0 | 0 ms |
+| Dense Top-20 → BM25 → Top-5 | **1.000** | 0.738 | 6 | 1.9 ms |
+
+All expected evidence reached the Top-20 candidate set, but BM25 discarded relevant semantic, cross-document, and cross-domain sources. The tested reranker therefore remains disabled and dense Top-5 remains the selected production path.
+
 Run all offline tests with:
 
 ```bash
@@ -209,6 +237,10 @@ config/retrieval_experiments/
 ├── retrieval_sparse.yaml
 └── retrieval_hybrid.yaml
 
+config/reranking_experiments/
+├── reranking_disabled.yaml
+└── reranking_bm25.yaml
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
@@ -216,6 +248,7 @@ evaluation/
 ├── run_chunk_experiments.py # Phase 3 controlled experiment runner
 ├── run_embedding_experiments.py # Phase 4 controlled experiment runner
 ├── run_retrieval_experiments.py # Phase 5 controlled experiment runner
+├── run_reranking_experiments.py # Phase 6 controlled experiment runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -229,13 +262,16 @@ src/i_got_this_rag/
 ├── ingestion.py             # reusable Phase 1 loading and chunking behavior
 ├── retrieval.py             # dense, BM25, and RRF retrieval strategies
 ├── retrieval_experiments.py # Phase 5 config and guarded indexing
+├── reranking.py             # optional candidate reranking pipeline
+├── reranking_experiments.py # Phase 6 config and guarded indexing
 └── settings.py              # typed environment configuration
 
 tests/
 ├── test_phase2_evaluation.py
 ├── test_phase3_chunking.py
 ├── test_phase4_embeddings.py
-└── test_phase5_retrieval.py
+├── test_phase5_retrieval.py
+└── test_phase6_reranking.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

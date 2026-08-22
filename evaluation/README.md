@@ -156,6 +156,31 @@ uv run python evaluation/run_retrieval_experiments.py
 
 The current run measured 0.900 Recall@5 for dense retrieval, 0.738 for sparse BM25, and 0.840 for hybrid RRF. All strategies achieved perfect exact-lookup and date/deadline recall. Hybrid improved exact-lookup mean expected-source rank, but both lexical strategies performed substantially worse on cross-domain questions. Dense therefore remains the selected retrieval strategy for this controlled corpus.
 
+## Phase 6 reranking experiments
+
+Phase 6 compares two dense retrieval paths:
+
+- **Baseline:** retrieve and generate from Pinecone Top-5 with reranking disabled.
+- **Reranked:** retrieve Pinecone Top-20, score those candidates with deterministic local BM25, and generate from the reranked Top-5.
+
+The BM25 candidate reranker is the PRD's compatible local reranker option. It adds no hosted service or model and uses the original question to score only the dense candidate set. The generation model and grounded prompt remain unchanged.
+
+Run the suite from the repository root:
+
+```bash
+uv run python evaluation/run_reranking_experiments.py
+```
+
+Each question result records:
+
+- all pre-rerank candidates with dense score and candidate rank;
+- the final Top-5 with candidate rank, dense score, and BM25 reranker score;
+- candidate retrieval, reranking, generation, and total latency;
+- candidate expected-source ranks and candidate recall; and
+- whether each missing final source was absent from the candidate set or lost during reranking.
+
+The controlled run found 1.000 candidate recall for dense Top-20, proving that all expected evidence reached the reranker. BM25 then reduced final Recall@5 from 0.900 to 0.738, producing six reranking-failure questions across semantic, cross-document, and cross-domain categories. The reranker is therefore not selected for production.
+
 ## Phase boundary
 
-Phase 5 varies retrieval strategy only. Candidate expansion and reranking, metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.
+Phase 6 varies candidate count and optional reranking only. Metadata-aware retrieval, query transformation, LangGraph, and UI work remain intentionally unimplemented.

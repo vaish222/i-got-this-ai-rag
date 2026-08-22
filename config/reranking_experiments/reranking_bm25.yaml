@@ -1,0 +1,7 @@
+experiment_id: E402_dense_top20_bm25
+experiment_name: Dense Top-20 with BM25 reranking to Top-5
+candidate_k: 20
+reranker_enabled: true
+reranker: bm25
+pinecone_namespace: phase6-reranking-500
+

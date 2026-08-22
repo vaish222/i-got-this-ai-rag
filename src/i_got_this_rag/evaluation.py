@@ -96,6 +96,8 @@ def serialize_retrieval(results: list[tuple[Document, float]]) -> list[dict[str,
         }
         if metadata.get("retrieval_components") is not None:
             serialized["retrieval_components"] = metadata["retrieval_components"]
+        if metadata.get("reranking_components") is not None:
+            serialized["reranking_components"] = metadata["reranking_components"]
         retrieved_chunks.append(serialized)
     return retrieved_chunks
 
@@ -103,6 +105,7 @@ def serialize_retrieval(results: list[tuple[Document, float]]) -> list[dict[str,
 def expected_source_metrics(
     expected_source_ids: list[str],
     retrieved_chunks: list[dict[str, Any]],
+    cutoff: int = 5,
 ) -> tuple[dict[str, int | None], int | None, float | None]:
     if not expected_source_ids:
         return {}, None, None
@@ -119,8 +122,8 @@ def expected_source_metrics(
         )
     found_ranks = [rank for rank in ranks.values() if rank is not None]
     best_rank = min(found_ranks) if found_ranks else None
-    found_at_5 = sum(rank is not None and rank <= 5 for rank in ranks.values())
-    return ranks, best_rank, found_at_5 / len(expected_source_ids)
+    found_at_cutoff = sum(rank is not None and rank <= cutoff for rank in ranks.values())
+    return ranks, best_rank, found_at_cutoff / len(expected_source_ids)
 
 
 def extract_citations(answer: str, retrieved_chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -184,6 +187,9 @@ def summarize_by_category(results: list[dict[str, Any]]) -> dict[str, dict[str, 
             "mean_retrieval_latency_seconds": mean(
                 result["retrieval_latency_seconds"] for result in category_results
             ),
+            "mean_reranking_latency_seconds": mean(
+                result.get("reranking_latency_seconds", 0.0) for result in category_results
+            ),
             "mean_llm_latency_seconds": mean(
                 result["llm_latency_seconds"] for result in category_results
             ),
@@ -219,6 +225,16 @@ def build_question_comparison(experiment_results: list[dict[str, Any]]) -> list[
                         "expected_source_ranks": questions[question["question_id"]][
                             "expected_source_ranks"
                         ],
+                        "candidate_recall": questions[question["question_id"]].get(
+                            "candidate_recall"
+                        ),
+                        "candidate_expected_source_ranks": questions[question["question_id"]].get(
+                            "candidate_expected_source_ranks"
+                        ),
+                        "reranking_latency_seconds": questions[question["question_id"]].get(
+                            "reranking_latency_seconds",
+                            0.0,
+                        ),
                         "retrieval_latency_seconds": questions[question["question_id"]][
                             "retrieval_latency_seconds"
                         ],
@@ -230,6 +246,66 @@ def build_question_comparison(experiment_results: list[dict[str, Any]]) -> list[
     return comparisons
 
 
+def diagnose_retrieval_and_reranking_failures(
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    by_category: dict[str, dict[str, int]] = {}
+    retrieval_source_failures = 0
+    reranking_source_failures = 0
+    retrieval_question_failures: set[str] = set()
+    reranking_question_failures: set[str] = set()
+
+    for result in results:
+        if not result["expected_source_ids"]:
+            continue
+        retrieval_missing: list[str] = []
+        reranking_missing: list[str] = []
+        for source_id in result["expected_source_ids"]:
+            final_rank = result["expected_source_ranks"].get(source_id)
+            if final_rank is not None and final_rank <= 5:
+                continue
+            candidate_rank = result["candidate_expected_source_ranks"].get(source_id)
+            if candidate_rank is None:
+                retrieval_missing.append(source_id)
+            else:
+                reranking_missing.append(source_id)
+
+        if not retrieval_missing and not reranking_missing:
+            continue
+        question_id = str(result["question_id"])
+        category = str(result["category"])
+        category_counts = by_category.setdefault(
+            category,
+            {"retrieval_source_failures": 0, "reranking_source_failures": 0},
+        )
+        if retrieval_missing:
+            retrieval_question_failures.add(question_id)
+            retrieval_source_failures += len(retrieval_missing)
+            category_counts["retrieval_source_failures"] += len(retrieval_missing)
+        if reranking_missing:
+            reranking_question_failures.add(question_id)
+            reranking_source_failures += len(reranking_missing)
+            category_counts["reranking_source_failures"] += len(reranking_missing)
+        failures.append(
+            {
+                "question_id": question_id,
+                "category": category,
+                "retrieval_failure_source_ids": retrieval_missing,
+                "reranking_failure_source_ids": reranking_missing,
+            }
+        )
+
+    return {
+        "retrieval_failure_question_count": len(retrieval_question_failures),
+        "reranking_failure_question_count": len(reranking_question_failures),
+        "retrieval_failure_source_count": retrieval_source_failures,
+        "reranking_failure_source_count": reranking_source_failures,
+        "by_category": by_category,
+        "failures": failures,
+    }
+
+
 class BaselineEvaluator:
     def __init__(self, pipeline: RAGPipeline) -> None:
         self.pipeline = pipeline
@@ -237,10 +313,24 @@ class BaselineEvaluator:
     def evaluate_question(self, question: dict[str, Any]) -> dict[str, Any]:
         started = perf_counter()
         retrieval_started = perf_counter()
-        raw_results = self.pipeline.retrieve(str(question["question"]))
+        retrieve_with_trace = getattr(self.pipeline, "retrieve_with_trace", None)
+        if callable(retrieve_with_trace):
+            trace = retrieve_with_trace(str(question["question"]))
+            raw_results = trace["results"]
+            candidate_results = trace["candidate_results"]
+            candidate_retrieval_latency = float(trace["candidate_retrieval_latency_seconds"])
+            reranking_latency = float(trace["reranking_latency_seconds"])
+            reranking_enabled = bool(trace["reranking_enabled"])
+        else:
+            raw_results = self.pipeline.retrieve(str(question["question"]))
+            candidate_results = raw_results
+            candidate_retrieval_latency = perf_counter() - retrieval_started
+            reranking_latency = 0.0
+            reranking_enabled = False
         retrieval_latency = perf_counter() - retrieval_started
 
         retrieved_chunks = serialize_retrieval(raw_results)
+        candidate_chunks = serialize_retrieval(candidate_results)
         generation_started = perf_counter()
         generated_answer = self.pipeline.generate(str(question["question"]), raw_results)
         generation_latency = perf_counter() - generation_started
@@ -248,6 +338,11 @@ class BaselineEvaluator:
 
         expected_ids = [str(source_id) for source_id in question["expected_source_ids"]]
         source_ranks, best_rank, recall_at_5 = expected_source_metrics(expected_ids, retrieved_chunks)
+        candidate_source_ranks, candidate_best_rank, candidate_recall = expected_source_metrics(
+            expected_ids,
+            candidate_chunks,
+            cutoff=len(candidate_chunks),
+        )
         citations = extract_citations(generated_answer, retrieved_chunks)
 
         return {
@@ -258,6 +353,11 @@ class BaselineEvaluator:
             "expected_answer": question["expected_answer"],
             "expected_source_ids": expected_ids,
             "expected_sources": question["expected_sources"],
+            "candidate_chunks": candidate_chunks,
+            "candidate_k": len(candidate_chunks),
+            "candidate_expected_source_ranks": candidate_source_ranks,
+            "candidate_expected_source_rank": candidate_best_rank,
+            "candidate_recall": candidate_recall,
             "retrieved_chunks": retrieved_chunks,
             "expected_source_ranks": source_ranks,
             "expected_source_rank": best_rank,
@@ -265,6 +365,9 @@ class BaselineEvaluator:
             "generated_answer": generated_answer,
             "citation_labels": [citation["label"] for citation in citations],
             "citations": citations,
+            "reranking_enabled": reranking_enabled,
+            "candidate_retrieval_latency_seconds": round(candidate_retrieval_latency, 6),
+            "reranking_latency_seconds": round(reranking_latency, 6),
             "retrieval_latency_seconds": round(retrieval_latency, 6),
             "llm_latency_seconds": round(generation_latency, 6),
             "generation_latency_seconds": round(generation_latency, 6),
@@ -275,6 +378,9 @@ class BaselineEvaluator:
         started_at = utc_now()
         results = [self.evaluate_question(question) for question in dataset.questions]
         scored_results = [result for result in results if result["recall_at_5"] is not None]
+        candidate_scored_results = [
+            result for result in results if result["candidate_recall"] is not None
+        ]
         expected_ranks = [
             rank
             for result in scored_results
@@ -300,9 +406,18 @@ class BaselineEvaluator:
                 "question_count": len(results),
                 "recall_at_5": mean(result["recall_at_5"] for result in scored_results),
                 "recall_at_5_question_count": len(scored_results),
+                "mean_candidate_recall": mean(
+                    result["candidate_recall"] for result in candidate_scored_results
+                ),
                 "mean_expected_source_rank": mean(expected_ranks) if expected_ranks else None,
                 "retrieval_failure_count": sum(
                     summary["retrieval_failure_count"] for summary in category_summary.values()
+                ),
+                "mean_candidate_retrieval_latency_seconds": mean(
+                    result["candidate_retrieval_latency_seconds"] for result in results
+                ),
+                "mean_reranking_latency_seconds": mean(
+                    result["reranking_latency_seconds"] for result in results
                 ),
                 "mean_retrieval_latency_seconds": mean(
                     result["retrieval_latency_seconds"] for result in results
