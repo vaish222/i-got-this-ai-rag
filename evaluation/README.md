@@ -15,6 +15,12 @@ Expected source titles are human-readable, while expected source IDs provide sta
 
 Relative dates are evaluated as of **2026-08-20** in `America/Los_Angeles`.
 
+## Notebook interfaces
+
+Phases 2–9 have matching notebooks in `notebooks/`. Each notebook delegates execution to the phase's tested runner and reads the same generated JSON artifacts described in this document. The notebooks default to dry-run mode (`RUN_EXPERIMENT = False`) so opening or running exploratory cells cannot unexpectedly rebuild a Pinecone namespace or start a multi-model experiment.
+
+Select the repository `.venv` kernel, review the parameters, set `RUN_EXPERIMENT = True`, and run the execution cell when ready. Phase-specific namespace guards and controlled-variable validation remain enforced by the underlying runner.
+
 ## Phase 2 baseline runner
 
 The Phase 2 runner evaluates the existing Phase 1 dense Pinecone namespace. It is read-only: indexing remains the responsibility of the Phase 1 notebook.

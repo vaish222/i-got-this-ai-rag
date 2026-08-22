@@ -66,6 +66,24 @@ The default corpus is the synthetic `data/sample` directory. Pinecone receives a
 
 The notebook creates the configured serverless index if it does not exist and isolates this dataset in `PINECONE_NAMESPACE`. With `REBUILD_NAMESPACE = True`, rerunning the indexing cell replaces only that namespace and does not delete the Pinecone index or other namespaces.
 
+## Notebook interfaces for Phases 2–9
+
+Every implemented phase now has a notebook under `notebooks/`. Phases 2–9 delegate to the same tested command-line runners documented below, then load the generated JSON artifacts for interactive inspection. This keeps pipeline logic in `src/i_got_this_rag/` instead of duplicating it in notebook cells.
+
+The experiment notebooks default to `RUN_EXPERIMENT = False`. Review their parameters and configuration previews, change the switch to `True`, and run the execution cell when you are ready to connect to Ollama and Pinecone. Namespace-mutating runners retain their existing phase-prefix guards.
+
+| Phase | Notebook |
+|---:|---|
+| 1 | [Naive dense RAG](notebooks/phase_1_naive_dense_rag.ipynb) |
+| 2 | [Baseline evaluation](notebooks/phase_2_baseline_evaluation.ipynb) |
+| 3 | [Chunk-size experiments](notebooks/phase_3_chunking_experiments.ipynb) |
+| 4 | [Embedding-model experiments](notebooks/phase_4_embedding_experiments.ipynb) |
+| 5 | [Retrieval-strategy experiments](notebooks/phase_5_retrieval_experiments.ipynb) |
+| 6 | [Reranking experiments](notebooks/phase_6_reranking_experiments.ipynb) |
+| 7 | [Metadata-aware retrieval](notebooks/phase_7_metadata_experiments.ipynb) |
+| 8 | [Query transformation](notebooks/phase_8_query_transformation_experiments.ipynb) |
+| 9 | [LangGraph agentic RAG](notebooks/phase_9_langgraph_agentic_rag.ipynb) |
+
 ## Run the Phase 2 baseline evaluation
 
 First run the Phase 1 notebook through its indexing cell so the configured Pinecone namespace exists. Keep Ollama running, then execute:
@@ -364,7 +382,15 @@ evaluation/
 └── results/                 # generated experiment config and results
 
 notebooks/
-└── phase_1_naive_dense_rag.ipynb
+├── phase_1_naive_dense_rag.ipynb
+├── phase_2_baseline_evaluation.ipynb
+├── phase_3_chunking_experiments.ipynb
+├── phase_4_embedding_experiments.ipynb
+├── phase_5_retrieval_experiments.ipynb
+├── phase_6_reranking_experiments.ipynb
+├── phase_7_metadata_experiments.ipynb
+├── phase_8_query_transformation_experiments.ipynb
+└── phase_9_langgraph_agentic_rag.ipynb
 
 src/i_got_this_rag/
 ├── baseline.py              # read-only connection to the Phase 1 pipeline
@@ -385,6 +411,7 @@ src/i_got_this_rag/
 └── settings.py              # typed environment configuration
 
 tests/
+├── test_phase_notebooks.py
 ├── test_phase2_evaluation.py
 ├── test_phase3_chunking.py
 ├── test_phase4_embeddings.py
