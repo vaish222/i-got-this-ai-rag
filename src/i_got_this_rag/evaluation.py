@@ -106,6 +106,10 @@ def serialize_retrieval(results: list[tuple[Document, float]]) -> list[dict[str,
             serialized["query_transformation_components"] = metadata[
                 "query_transformation_components"
             ]
+        if metadata.get("agentic_retrieval_components") is not None:
+            serialized["agentic_retrieval_components"] = metadata[
+                "agentic_retrieval_components"
+            ]
         retrieved_chunks.append(serialized)
     return retrieved_chunks
 

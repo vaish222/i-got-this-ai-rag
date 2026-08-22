@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 8 complete
+## Current status: Phase 9 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -45,7 +45,9 @@ Phase 7 adds optional metadata-aware dense retrieval. A deterministic analyzer e
 
 Phase 8 adds local LLM query rewriting and multi-query retrieval. It compares the original dense query, one guarded rewrite, and the original plus two guarded rewrites fused with reciprocal-rank fusion. Exact terms are preserved, newly invented dates/times/IDs are removed, and raw model output and guard repairs remain observable.
 
-No Phase 9+ work is included: there is no LangGraph orchestration, evidence grading, retry loop, or UI.
+Phase 9 wraps the selected retrieval and generation components in a LangGraph `StateGraph`. It analyzes intent, builds metadata filters, retrieves dense Top-5 evidence, retains a reranking node with the Phase 6-selected disabled setting, grades evidence, permits one guarded query-rewrite retry, verifies grounding, and returns the explicit insufficient-information response when evidence or support checks fail.
+
+No Phase 10+ work is included: the final cross-version Recall@5, faithfulness, and latency evaluation remains unimplemented, as do dashboard and UI phases.
 
 ## Run the Phase 1 notebook
 
@@ -268,6 +270,33 @@ The verified controlled run produced:
 
 The lower rewrite rank applies only to expected sources that were still retrieved; it does not offset the recall loss. Single-query rewriting reduced recall on Q004 and Q012. Multi-query retrieval reduced recall on Q012 and also worsened source ordering on four other questions. Original dense retrieval therefore remains the selected default.
 
+## Run the Phase 9 LangGraph workflow
+
+Keep Ollama running, configure Pinecone in `.env`, and execute one question through the graph:
+
+```bash
+uv run python evaluation/run_agentic_rag.py \
+  --question "Which invitations still need an RSVP?"
+```
+
+The graph follows the Phase 9 path:
+
+```text
+analyze → rewrite → metadata → retrieve → rerank → grade
+                                                    ├─ sufficient → generate → verify → answer/refuse
+                                                    └─ weak → retry once → generate or refuse
+```
+
+The first retrieval keeps the original query and can use metadata filtering with dense fallback. If evidence is weak, the only allowed retry uses the existing guarded rewrite and broadens retrieval by removing the metadata filter. Reranking is an explicit measured no-op because the Phase 6 BM25 reranker was not selected. When the local model omits citations, a deterministic attributor adds one only if the claim's concrete facts and informative terms match a retrieved source. The grounding verifier then requires resolvable claim-level citations and rejects unsupported IDs, dates, times, numbers, or claims.
+
+The runner rebuilds only its guarded `phase9-*` namespace and writes the state, node trace, query history, retrieval attempts, evidence grades, citations, grounding result, and latencies to:
+
+```text
+evaluation/results/phase9_agentic/run.json
+```
+
+This is a single-workflow execution artifact, not the Phase 10 cross-version evaluation.
+
 Run all offline tests with:
 
 ```bash
@@ -318,6 +347,9 @@ config/query_experiments/
 ├── query_rewrite.yaml
 └── query_multi.yaml
 
+config/
+└── agentic_rag.yaml         # Phase 9 graph and retry configuration
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
@@ -328,6 +360,7 @@ evaluation/
 ├── run_reranking_experiments.py # Phase 6 controlled experiment runner
 ├── run_metadata_experiments.py # Phase 7 controlled experiment runner
 ├── run_query_experiments.py # Phase 8 controlled experiment runner
+├── run_agentic_rag.py       # Phase 9 single-workflow runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -347,6 +380,8 @@ src/i_got_this_rag/
 ├── metadata_experiments.py  # Phase 7 config and guarded indexing
 ├── query_transformation.py  # Phase 8 rewriting, guards, and multi-query fusion
 ├── query_experiments.py     # Phase 8 config, impact analysis, and guarded indexing
+├── agentic_rag.py           # Phase 9 LangGraph state, nodes, and routing
+├── agentic_experiments.py   # Phase 9 config and guarded namespace indexing
 └── settings.py              # typed environment configuration
 
 tests/
@@ -356,7 +391,8 @@ tests/
 ├── test_phase5_retrieval.py
 ├── test_phase6_reranking.py
 ├── test_phase7_metadata.py
-└── test_phase8_query_transformation.py
+├── test_phase8_query_transformation.py
+└── test_phase9_agentic_rag.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

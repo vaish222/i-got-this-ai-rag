@@ -1,0 +1,15 @@
+experiment_id: E701_langgraph_agentic_rag
+experiment_name: Phase 9 conditional LangGraph RAG
+pinecone_namespace: phase9-agentic-500
+graph_version: phase9-langgraph-v1
+metadata_filter_enabled: true
+metadata_fallback_enabled: true
+retry_query_rewriting_enabled: true
+retry_query_strategy: rewrite
+reranker_enabled: false
+reranker: null
+initial_candidate_k: 5
+retry_candidate_k: 5
+final_top_k: 5
+max_retrieval_attempts: 2
+minimum_evidence_term_coverage: 0.2

@@ -231,6 +231,25 @@ The verified run measured:
 
 Single rewriting improved three answerable questions, degraded four, and left six unchanged; recall fell on Q004 and Q012. Multi-query improved two, degraded five, and left six unchanged; recall fell on Q012. Original dense retrieval remains selected because neither transformation improved aggregate recall and both added substantial latency.
 
+## Phase 9 LangGraph workflow
+
+Phase 9 refactors the selected components into a conditional LangGraph `StateGraph` without replacing the existing retrieval, metadata-analysis, guarded-rewrite, or grounded-generation modules. Its nodes cover query analysis, query rewriting, metadata construction, retrieval, reranking, evidence grading, generation, and grounding verification.
+
+Run one question from the repository root:
+
+```bash
+uv run python evaluation/run_agentic_rag.py \
+  --question "Which invitations still need an RSVP?"
+```
+
+The workflow uses the original query for the first dense Top-5 retrieval. Metadata constraints can filter that attempt, with dense fallback filling short result sets. Weak evidence can trigger exactly one guarded LLM rewrite and an unfiltered dense retry. The reranking node remains disabled because Phase 6 found that the tested BM25 reranker reduced final Recall@5.
+
+Evidence grading occurs before generation. If the local model omits citations, deterministic attribution adds a source label only when the claim's concrete facts and informative terms match that source. The grounding verifier then requires valid claim-level citations and checks support for IDs, dates, times, numeric facts, and claim terms. Weak evidence after the retry or failed grounding produces the standard explicit insufficient-information response.
+
+The runner writes `evaluation/results/phase9_agentic/run.json`, including the full serializable graph state, node trace, query and retrieval histories, evidence grades, answer, citations, grounding decision, and latency. It rebuilds only namespaces beginning with `phase9-`.
+
+This runner validates a single Phase 9 workflow. It intentionally does not run the Phase 10 cross-version evaluation or populate Recall@5, faithfulness, and latency comparisons.
+
 ## Phase boundary
 
-Phase 8 implements guarded query rewriting and multi-query retrieval only. HyDE, query decomposition, LangGraph, evidence grading, retries, and UI work remain intentionally unimplemented.
+Phase 9 implements LangGraph orchestration, evidence grading, one bounded retry, and grounding-based refusal. Phase 10 final cross-version evaluation and later dashboard/UI work remain intentionally unimplemented.
