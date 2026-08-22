@@ -1,0 +1,8 @@
+experiment_id: E603_dense_multi_query
+experiment_name: Dense Top-5 with original plus two LLM queries fused by RRF
+query_strategy: multi_query
+query_transformer: phase8-llm-v1
+generated_query_count: 2
+fusion: rrf
+rrf_k: 60
+pinecone_namespace: phase8-query-500

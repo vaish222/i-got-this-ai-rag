@@ -203,6 +203,34 @@ Per-question results record the extracted constraints, exact Pinecone filter, fi
 
 The current run measured identical 0.900 Recall@5 for both paths. Metadata filtering improved expected-source ordering on three answerable questions, degraded four, and left six unchanged. Mean expected-source rank improved slightly from 2.423 to 2.385, while mean retrieval latency rose from 194 ms to 371 ms because filtered searches frequently needed a second dense fallback query. The filtered path remains optional rather than becoming the selected default.
 
+## Phase 8 query-transformation experiments
+
+Phase 8 compares exactly three query strategies while holding the corpus, 500/75 chunks, `embeddinggemma`, Pinecone index, dense Top-5 output, generation model, grounded prompt, and evaluation questions fixed:
+
+- **Original:** retrieve with the user's question unchanged.
+- **Rewrite:** ask local `gemma3:1b` for one retrieval-focused query and search only that rewrite.
+- **Multi-query:** retrieve with the original plus two generated queries, then fuse the three rankings with RRF (`rrf_k=60`) to a final Top-5.
+
+The transformation guard extracts protected anonymous IDs, dates, times, relative-date phrases, event names, domain terms, deadline language, RSVP status, and gift terminology. It restores protected terms omitted by the model and removes newly invented IDs, dates, years, and times. Multi-query parsing accepts the first valid JSON array when the small local model emits duplicate fenced arrays. These repairs and the raw model output remain in the result record.
+
+Run the suite from the repository root:
+
+```bash
+uv run python evaluation/run_query_experiments.py
+```
+
+Each question records the original query, generated queries, actual retrieval queries, protected terms, guard repairs, raw transformation output, fusion components, transformation latency, vector-search latency, retrieved sources, answer, and citations. The comparison explicitly lists quality-reduction and recall-reduction question IDs for both transformed strategies.
+
+The verified run measured:
+
+| Query strategy | Recall@5 | Mean found-source rank | Transformation latency | Total retrieval latency |
+|---|---:|---:|---:|---:|
+| Original | **0.900** | 2.577 | 0 ms | **196 ms** |
+| One rewrite | 0.865 | **2.042** | 295 ms | 480 ms |
+| Original + two rewrites | 0.890 | 2.440 | 430 ms | 1,036 ms |
+
+Single rewriting improved three answerable questions, degraded four, and left six unchanged; recall fell on Q004 and Q012. Multi-query improved two, degraded five, and left six unchanged; recall fell on Q012. Original dense retrieval remains selected because neither transformation improved aggregate recall and both added substantial latency.
+
 ## Phase boundary
 
-Phase 7 implements metadata analysis and filtering only. Query rewriting, multi-query retrieval, LangGraph, and UI work remain intentionally unimplemented.
+Phase 8 implements guarded query rewriting and multi-query retrieval only. HyDE, query decomposition, LangGraph, evidence grading, retries, and UI work remain intentionally unimplemented.

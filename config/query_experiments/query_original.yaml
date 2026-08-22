@@ -1,0 +1,8 @@
+experiment_id: E601_dense_original_query
+experiment_name: Dense Top-5 with original query
+query_strategy: original
+query_transformer: null
+generated_query_count: 0
+fusion: null
+rrf_k: null
+pinecone_namespace: phase8-query-500

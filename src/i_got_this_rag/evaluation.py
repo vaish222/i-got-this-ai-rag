@@ -102,6 +102,10 @@ def serialize_retrieval(results: list[tuple[Document, float]]) -> list[dict[str,
             serialized["metadata_retrieval_components"] = metadata[
                 "metadata_retrieval_components"
             ]
+        if metadata.get("query_transformation_components") is not None:
+            serialized["query_transformation_components"] = metadata[
+                "query_transformation_components"
+            ]
         retrieved_chunks.append(serialized)
     return retrieved_chunks
 
@@ -206,6 +210,21 @@ def summarize_by_category(results: list[dict[str, Any]]) -> dict[str, dict[str, 
                 result.get("metadata_analysis_latency_seconds", 0.0)
                 for result in category_results
             ),
+            "query_transformation_enabled_question_count": sum(
+                bool(result.get("query_transformation_enabled", False))
+                for result in category_results
+            ),
+            "query_guard_triggered_question_count": sum(
+                bool(result.get("query_guard_triggered", False))
+                for result in category_results
+            ),
+            "mean_query_count": mean(
+                int(result.get("query_count", 1)) for result in category_results
+            ),
+            "mean_query_transformation_latency_seconds": mean(
+                result.get("query_transformation_latency_seconds", 0.0)
+                for result in category_results
+            ),
             "mean_llm_latency_seconds": mean(
                 result["llm_latency_seconds"] for result in category_results
             ),
@@ -268,6 +287,24 @@ def build_question_comparison(experiment_results: list[dict[str, Any]]) -> list[
                         "metadata_fallback_result_count": questions[
                             question["question_id"]
                         ].get("metadata_fallback_result_count", 0),
+                        "query_transformation_strategy": questions[
+                            question["question_id"]
+                        ].get("query_transformation_strategy", "original"),
+                        "retrieval_queries": questions[question["question_id"]].get(
+                            "retrieval_queries",
+                            [questions[question["question_id"]].get("question", "")],
+                        ),
+                        "generated_queries": questions[question["question_id"]].get(
+                            "generated_queries",
+                            [],
+                        ),
+                        "query_guard_triggered": questions[question["question_id"]].get(
+                            "query_guard_triggered",
+                            False,
+                        ),
+                        "query_transformation_latency_seconds": questions[
+                            question["question_id"]
+                        ].get("query_transformation_latency_seconds", 0.0),
                         "retrieval_latency_seconds": questions[question["question_id"]][
                             "retrieval_latency_seconds"
                         ],
@@ -368,6 +405,27 @@ class BaselineEvaluator:
                 trace.get("metadata_fallback_result_count", 0)
             )
             retrieval_query = str(trace.get("retrieval_query", question["question"]))
+            query_transformation_enabled = bool(
+                trace.get("query_transformation_enabled", False)
+            )
+            query_transformation_strategy = str(
+                trace.get("query_transformation_strategy", "original")
+            )
+            query_transformation_version = trace.get("query_transformation_version")
+            query_transformation_latency = float(
+                trace.get("query_transformation_latency_seconds", 0.0)
+            )
+            original_query = str(trace.get("original_query", question["question"]))
+            retrieval_queries = list(trace.get("retrieval_queries", [retrieval_query]))
+            generated_queries = list(trace.get("generated_queries", []))
+            protected_query_terms = list(trace.get("protected_query_terms", []))
+            query_guard_triggered = bool(trace.get("query_guard_triggered", False))
+            query_guard_repairs = list(trace.get("query_guard_repairs", []))
+            raw_query_transformation_output = trace.get(
+                "raw_query_transformation_output"
+            )
+            multi_query_fusion = trace.get("multi_query_fusion")
+            query_count = int(trace.get("query_count", len(retrieval_queries)))
         else:
             raw_results = self.pipeline.retrieve(str(question["question"]))
             candidate_results = raw_results
@@ -382,6 +440,19 @@ class BaselineEvaluator:
             metadata_filtered_result_count = 0
             metadata_fallback_result_count = 0
             retrieval_query = str(question["question"])
+            query_transformation_enabled = False
+            query_transformation_strategy = "original"
+            query_transformation_version = None
+            query_transformation_latency = 0.0
+            original_query = str(question["question"])
+            retrieval_queries = [original_query]
+            generated_queries = []
+            protected_query_terms = []
+            query_guard_triggered = False
+            query_guard_repairs = []
+            raw_query_transformation_output = None
+            multi_query_fusion = None
+            query_count = 1
         retrieval_latency = perf_counter() - retrieval_started
 
         retrieved_chunks = serialize_retrieval(raw_results)
@@ -429,6 +500,22 @@ class BaselineEvaluator:
             "metadata_filtered_result_count": metadata_filtered_result_count,
             "metadata_fallback_result_count": metadata_fallback_result_count,
             "metadata_analysis_latency_seconds": round(metadata_analysis_latency, 6),
+            "query_transformation_enabled": query_transformation_enabled,
+            "query_transformation_strategy": query_transformation_strategy,
+            "query_transformation_version": query_transformation_version,
+            "query_transformation_latency_seconds": round(
+                query_transformation_latency,
+                6,
+            ),
+            "original_query": original_query,
+            "retrieval_queries": retrieval_queries,
+            "generated_queries": generated_queries,
+            "protected_query_terms": protected_query_terms,
+            "query_guard_triggered": query_guard_triggered,
+            "query_guard_repairs": query_guard_repairs,
+            "raw_query_transformation_output": raw_query_transformation_output,
+            "multi_query_fusion": multi_query_fusion,
+            "query_count": query_count,
             "candidate_retrieval_latency_seconds": round(candidate_retrieval_latency, 6),
             "reranking_latency_seconds": round(reranking_latency, 6),
             "retrieval_latency_seconds": round(retrieval_latency, 6),
@@ -490,6 +577,16 @@ class BaselineEvaluator:
                 ),
                 "mean_metadata_analysis_latency_seconds": mean(
                     result["metadata_analysis_latency_seconds"] for result in results
+                ),
+                "query_transformation_enabled_question_count": sum(
+                    result["query_transformation_enabled"] for result in results
+                ),
+                "query_guard_triggered_question_count": sum(
+                    result["query_guard_triggered"] for result in results
+                ),
+                "mean_query_count": mean(result["query_count"] for result in results),
+                "mean_query_transformation_latency_seconds": mean(
+                    result["query_transformation_latency_seconds"] for result in results
                 ),
                 "mean_retrieval_latency_seconds": mean(
                     result["retrieval_latency_seconds"] for result in results

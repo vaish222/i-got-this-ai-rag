@@ -1,0 +1,8 @@
+experiment_id: E602_dense_llm_rewrite
+experiment_name: Dense Top-5 with one LLM-rewritten query
+query_strategy: rewrite
+query_transformer: phase8-llm-v1
+generated_query_count: 1
+fusion: null
+rrf_k: null
+pinecone_namespace: phase8-query-500

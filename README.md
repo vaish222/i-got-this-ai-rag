@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 7 complete
+## Current status: Phase 8 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -43,7 +43,9 @@ Phase 6 adds optional two-stage reranking and compares the selected dense Top-5 
 
 Phase 7 adds optional metadata-aware dense retrieval. A deterministic analyzer extracts high-confidence domain, person, document-type, event-type, date, status, RSVP-status, and gift-status constraints without rewriting the question. Pinecone applies those filters first, then dense fallback fills any remaining Top-5 slots so narrow metadata cannot reduce the evidence count.
 
-No Phase 8+ work is included: there is no query rewriting, LangGraph, or UI.
+Phase 8 adds local LLM query rewriting and multi-query retrieval. It compares the original dense query, one guarded rewrite, and the original plus two guarded rewrites fused with reciprocal-rank fusion. Exact terms are preserved, newly invented dates/times/IDs are removed, and raw model output and guard repairs remain observable.
+
+No Phase 9+ work is included: there is no LangGraph orchestration, evidence grading, retry loop, or UI.
 
 ## Run the Phase 1 notebook
 
@@ -230,6 +232,42 @@ The verified controlled run produced:
 
 Filtering improved expected-source ordering on three answerable questions, degraded it on four, and left six unchanged; the two unanswerable questions are unscored. It improved cross-document ranking and the overall mean expected-source rank slightly, but exact-lookup and semantic mean ranks became worse. Since it added latency without improving Recall@5, metadata filtering remains available but is not selected as the default retrieval path.
 
+## Run the Phase 8 query-transformation experiments
+
+Keep Ollama running and execute:
+
+```bash
+uv run python evaluation/run_query_experiments.py
+```
+
+Phase 8 compares three dense Top-5 paths over one controlled `phase8-*` namespace:
+
+- the original user question;
+- one `gemma3:1b` retrieval-focused rewrite; and
+- the original plus two generated queries, fused with RRF (`rrf_k=60`).
+
+The rewriter is guarded: anonymous IDs, dates, times, event names, domain terms, deadlines, RSVP status, and gift terminology must survive transformation. Missing terms are restored, and newly invented IDs, dates, years, or times are removed. The original question is always used for answer generation.
+
+The runner writes:
+
+```text
+evaluation/results/phase8_query_transformation/
+├── comparison.json
+├── E601_dense_original_query/{config.json,results.json}
+├── E602_dense_llm_rewrite/{config.json,results.json}
+└── E603_dense_multi_query/{config.json,results.json}
+```
+
+The verified controlled run produced:
+
+| Query strategy | Recall@5 | Mean found-source rank | Transformation latency | Total retrieval latency |
+|---|---:|---:|---:|---:|
+| Original query | **0.900** | 2.577 | 0 ms | **196 ms** |
+| One LLM rewrite | 0.865 | **2.042** | 295 ms | 480 ms |
+| Original + two rewrites, RRF | 0.890 | 2.440 | 430 ms | 1,036 ms |
+
+The lower rewrite rank applies only to expected sources that were still retrieved; it does not offset the recall loss. Single-query rewriting reduced recall on Q004 and Q012. Multi-query retrieval reduced recall on Q012 and also worsened source ordering on four other questions. Original dense retrieval therefore remains the selected default.
+
 Run all offline tests with:
 
 ```bash
@@ -275,6 +313,11 @@ config/metadata_experiments/
 ├── metadata_unfiltered.yaml
 └── metadata_filtered.yaml
 
+config/query_experiments/
+├── query_original.yaml
+├── query_rewrite.yaml
+└── query_multi.yaml
+
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
@@ -284,6 +327,7 @@ evaluation/
 ├── run_retrieval_experiments.py # Phase 5 controlled experiment runner
 ├── run_reranking_experiments.py # Phase 6 controlled experiment runner
 ├── run_metadata_experiments.py # Phase 7 controlled experiment runner
+├── run_query_experiments.py # Phase 8 controlled experiment runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -301,6 +345,8 @@ src/i_got_this_rag/
 ├── reranking_experiments.py # Phase 6 config and guarded indexing
 ├── metadata_retrieval.py    # Phase 7 facet extraction and filtered dense retrieval
 ├── metadata_experiments.py  # Phase 7 config and guarded indexing
+├── query_transformation.py  # Phase 8 rewriting, guards, and multi-query fusion
+├── query_experiments.py     # Phase 8 config, impact analysis, and guarded indexing
 └── settings.py              # typed environment configuration
 
 tests/
@@ -309,7 +355,8 @@ tests/
 ├── test_phase4_embeddings.py
 ├── test_phase5_retrieval.py
 ├── test_phase6_reranking.py
-└── test_phase7_metadata.py
+├── test_phase7_metadata.py
+└── test_phase8_query_transformation.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```
