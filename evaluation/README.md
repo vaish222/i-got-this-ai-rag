@@ -23,11 +23,11 @@ Select the repository `.venv` kernel, review the parameters, set `RUN_EXPERIMENT
 
 ## Phase 2 baseline runner
 
-The Phase 2 runner evaluates the existing Phase 1 dense Pinecone namespace. It is read-only: indexing remains the responsibility of the Phase 1 notebook.
+The Phase 2 runner evaluates the existing Phase 1 dense Pinecone namespace. It is read-only: indexing remains the responsibility of the Phase 1 notebook or `evaluation/run_phase1.py`.
 
 Prerequisites:
 
-1. Populate `.env` and run the Phase 1 notebook through the Pinecone indexing cell.
+1. Populate `.env` and either run the Phase 1 notebook through the Pinecone indexing cell or run `uv run python evaluation/run_phase1.py`.
 2. Keep Ollama running with the configured embedding and chat models available.
 3. Run the evaluator from the repository root:
 

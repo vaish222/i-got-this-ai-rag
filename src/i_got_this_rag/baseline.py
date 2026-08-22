@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
@@ -11,7 +12,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_pinecone import PineconeVectorStore
-from pinecone import Pinecone
+from pinecone import Pinecone, ServerlessSpec
 
 from .settings import Settings
 
@@ -100,7 +101,12 @@ class DenseRAGResources:
     llm: ChatOllama
 
     @classmethod
-    def connect(cls, settings: Settings) -> "DenseRAGResources":
+    def connect(
+        cls,
+        settings: Settings,
+        *,
+        create_index: bool = False,
+    ) -> "DenseRAGResources":
         api_key = os.getenv("PINECONE_API_KEY", "").strip()
         if not api_key:
             raise ValueError("PINECONE_API_KEY is required to connect to the Pinecone index.")
@@ -123,10 +129,39 @@ class DenseRAGResources:
 
         pinecone_client = Pinecone(api_key=api_key)
         if not pinecone_client.has_index(settings.pinecone_index_name):
-            raise RuntimeError(
-                f"Pinecone index '{settings.pinecone_index_name}' does not exist. "
-                "Run the Phase 1 indexing notebook first."
+            if not create_index:
+                raise RuntimeError(
+                    f"Pinecone index '{settings.pinecone_index_name}' does not exist. "
+                    "Run the Phase 1 Python runner or indexing notebook first."
+                )
+            pinecone_client.create_index(
+                name=settings.pinecone_index_name,
+                dimension=embedding_dimension,
+                metric="cosine",
+                spec=ServerlessSpec(
+                    cloud=settings.pinecone_cloud,
+                    region=settings.pinecone_region,
+                ),
             )
+            deadline = time.monotonic() + 120
+            while True:
+                pending_description = pinecone_client.describe_index(
+                    settings.pinecone_index_name
+                )
+                status = pending_description.status
+                ready = (
+                    bool(status.get("ready", False))
+                    if isinstance(status, dict)
+                    else bool(status.ready)
+                )
+                if ready:
+                    break
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Pinecone index '{settings.pinecone_index_name}' was not ready "
+                        "within 120 seconds."
+                    )
+                time.sleep(2)
         index_description = pinecone_client.describe_index(settings.pinecone_index_name)
         if int(index_description.dimension) != embedding_dimension:
             raise ValueError(
@@ -158,6 +193,7 @@ class BaselineRAG:
         self,
         settings: Settings,
         resources: DenseRAGResources | None = None,
+        vector_store: PineconeVectorStore | None = None,
     ) -> None:
         self.settings = settings
         self.resources = resources or DenseRAGResources.connect(settings)
@@ -169,7 +205,7 @@ class BaselineRAG:
                 "Index that namespace before evaluating it."
             )
 
-        self.vector_store = PineconeVectorStore(
+        self.vector_store = vector_store or PineconeVectorStore(
             index=self.resources.pinecone_index,
             embedding=self.resources.embeddings,
             namespace=settings.pinecone_namespace,

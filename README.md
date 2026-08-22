@@ -14,7 +14,7 @@ The Phase 0 controlled dataset remains unchanged:
 
 The corpus uses fictional anonymous identifiers and a fixed reference date of **August 20, 2026**, which makes relative-time evaluation reproducible. See [data/README.md](data/README.md) for dataset conventions and [evaluation/README.md](evaluation/README.md) for the evaluation category distribution.
 
-Phase 1 is implemented as an executable notebook: [notebooks/phase_1_naive_dense_rag.ipynb](notebooks/phase_1_naive_dense_rag.ipynb). It provides:
+Phase 1 is available as both an executable walkthrough notebook, [notebooks/phase_1_naive_dense_rag.ipynb](notebooks/phase_1_naive_dense_rag.ipynb), and a repeatable Python runner, [evaluation/run_phase1.py](evaluation/run_phase1.py). It provides:
 
 - Markdown, TXT, and PDF loading;
 - whitespace cleaning and YAML front-matter preservation as metadata;
@@ -66,6 +66,23 @@ The default corpus is the synthetic `data/sample` directory. Pinecone receives a
 
 The notebook creates the configured serverless index if it does not exist and isolates this dataset in `PINECONE_NAMESPACE`. With `REBUILD_NAMESPACE = True`, rerunning the indexing cell replaces only that namespace and does not delete the Pinecone index or other namespaces.
 
+## Run Phase 1 from Python
+
+The Python runner executes the same reusable loading, chunking, local embedding, dense retrieval, and grounded-generation behavior:
+
+```bash
+uv run python evaluation/run_phase1.py \
+  --question "What do we need to bring to the neighborhood potluck?"
+```
+
+It creates the configured Pinecone index when missing, indexes an empty namespace, and otherwise reuses existing namespace vectors by default. Rebuild only the configured namespace explicitly with:
+
+```bash
+uv run python evaluation/run_phase1.py --rebuild-namespace
+```
+
+The runner never deletes the whole index. Its single-question artifact is written to `evaluation/results/phase1/run.json` and contains the public configuration, corpus and chunk fingerprints, indexing action, retrieved chunks, resolved citations, answer, and latency. It does not execute or score the Phase 2 evaluation dataset.
+
 ## Notebook interfaces for Phases 2–9
 
 Every implemented phase now has a notebook under `notebooks/`. Phases 2–9 delegate to the same tested command-line runners documented below, then load the generated JSON artifacts for interactive inspection. This keeps pipeline logic in `src/i_got_this_rag/` instead of duplicating it in notebook cells.
@@ -86,7 +103,7 @@ The experiment notebooks default to `RUN_EXPERIMENT = False`. Review their param
 
 ## Run the Phase 2 baseline evaluation
 
-First run the Phase 1 notebook through its indexing cell so the configured Pinecone namespace exists. Keep Ollama running, then execute:
+First run the Phase 1 notebook through its indexing cell or run `evaluation/run_phase1.py` so the configured Pinecone namespace exists. Keep Ollama running, then execute:
 
 ```bash
 uv run python evaluation/run_baseline.py
@@ -371,6 +388,7 @@ config/
 evaluation/
 ├── README.md
 ├── questions.json           # 15 ground-truth evaluation records
+├── run_phase1.py            # Phase 1 indexing and single-question runner
 ├── run_baseline.py          # Phase 2 command-line runner
 ├── run_chunk_experiments.py # Phase 3 controlled experiment runner
 ├── run_embedding_experiments.py # Phase 4 controlled experiment runner
@@ -412,6 +430,7 @@ src/i_got_this_rag/
 
 tests/
 ├── test_phase_notebooks.py
+├── test_phase1_runner.py
 ├── test_phase2_evaluation.py
 ├── test_phase3_chunking.py
 ├── test_phase4_embeddings.py
