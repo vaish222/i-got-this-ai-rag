@@ -676,7 +676,7 @@ def render_claim_faithfulness_audit() -> None:
 
 def render_qwen_generation_comparison() -> None:
     st.divider()
-    st.subheader("Qwen concise-generation comparison")
+    st.subheader("Latest: Qwen answer-quality optimization")
     st.caption(
         "E1/E2/E3 use the same Qwen model, 15 questions, and immutable Top-5 "
         "retrieval cache. Only answer directness, length policy, and E3 evidence "
@@ -697,6 +697,47 @@ def render_qwen_generation_comparison() -> None:
         st.error(f"The Qwen generation comparison could not be loaded: {exc}")
         return
 
+    versions = comparison["versions"]
+    baseline = versions[0]["metrics"]
+    highest_relevance = max(
+        versions,
+        key=lambda version: version["metrics"]["answer_relevance_correctness"],
+    )
+    highest_faithfulness = max(
+        versions,
+        key=lambda version: version["metrics"]["claim_level_faithfulness"],
+    )
+    lowest_output = min(
+        versions,
+        key=lambda version: version["metrics"]["average_output_tokens"],
+    )
+    fastest = min(
+        versions,
+        key=lambda version: version["metrics"]["average_latency_seconds"],
+    )
+
+    relevance, faithfulness, output, latency = st.columns(4)
+    relevance.metric(
+        "Highest relevance",
+        f"{highest_relevance['metrics']['answer_relevance_correctness']:.3f}",
+        highest_relevance["experiment_id"].split("_", 1)[0],
+    )
+    faithfulness.metric(
+        "Highest claim faithfulness",
+        f"{highest_faithfulness['metrics']['claim_level_faithfulness']:.3f}",
+        highest_faithfulness["experiment_id"].split("_", 1)[0],
+    )
+    output.metric(
+        "Lowest average output",
+        f"{lowest_output['metrics']['average_output_tokens']:.1f} tokens",
+        lowest_output["experiment_id"].split("_", 1)[0],
+    )
+    latency.metric(
+        "Fastest average latency",
+        f"{fastest['metrics']['average_latency_seconds']:.3f}s",
+        fastest["experiment_id"].split("_", 1)[0],
+    )
+
     st.dataframe(
         [
             {
@@ -712,7 +753,7 @@ def render_qwen_generation_comparison() -> None:
                 "P95 latency (s)": version["metrics"]["p95_latency_seconds"],
                 "Success": "Yes" if version["meets_success_criteria"] else "No",
             }
-            for version in comparison["versions"]
+            for version in versions
         ],
         hide_index=True,
         width="stretch",
@@ -727,17 +768,118 @@ def render_qwen_generation_comparison() -> None:
             "P95 latency (s)": st.column_config.NumberColumn(format="%.3f"),
         },
     )
+
+    def reduction(current: float, original: float) -> float:
+        if original == 0:
+            return 0.0
+        return ((original - current) / original) * 100
+
+    st.markdown("**Change from E1 (current strict prompt)**")
+    st.dataframe(
+        [
+            {
+                "Mode": version["experiment_id"].split("_", 1)[0],
+                "Faithfulness change": (
+                    version["metrics"]["claim_level_faithfulness"]
+                    - baseline["claim_level_faithfulness"]
+                ),
+                "Relevance change": (
+                    version["metrics"]["answer_relevance_correctness"]
+                    - baseline["answer_relevance_correctness"]
+                ),
+                "Fewer claims": reduction(
+                    version["metrics"]["average_claims_per_answer"],
+                    baseline["average_claims_per_answer"],
+                ),
+                "Fewer output tokens": reduction(
+                    version["metrics"]["average_output_tokens"],
+                    baseline["average_output_tokens"],
+                ),
+                "Lower avg. latency": reduction(
+                    version["metrics"]["average_latency_seconds"],
+                    baseline["average_latency_seconds"],
+                ),
+                "Lower P95 latency": reduction(
+                    version["metrics"]["p95_latency_seconds"],
+                    baseline["p95_latency_seconds"],
+                ),
+            }
+            for version in versions
+        ],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Faithfulness change": st.column_config.NumberColumn(format="%+.3f"),
+            "Relevance change": st.column_config.NumberColumn(format="%+.3f"),
+            "Fewer claims": st.column_config.NumberColumn(format="%.1f%%"),
+            "Fewer output tokens": st.column_config.NumberColumn(format="%.1f%%"),
+            "Lower avg. latency": st.column_config.NumberColumn(format="%.1f%%"),
+            "Lower P95 latency": st.column_config.NumberColumn(format="%.1f%%"),
+        },
+    )
+
     successful = [
         version["label"]
-        for version in comparison["versions"]
+        for version in versions
         if version["meets_success_criteria"]
     ]
     if successful:
-        st.success("All success criteria met: " + ", ".join(successful))
+        st.success("Modes meeting every success criterion: " + ", ".join(successful))
+        st.info(
+            "E2 has the highest relevance and lowest average latency. E3 has the "
+            "highest claim faithfulness, fewest unsupported claims, and lowest "
+            "token use. Both preserve Recall@5 at 0.900 and correct refusal at "
+            "1.000, so the preferred mode depends on the quality-versus-efficiency "
+            "tradeoff rather than one metric alone."
+        )
     else:
         st.warning(
             "No mode met every target simultaneously. Inspect the per-mode results "
             "before choosing a generation policy."
+        )
+
+    with st.expander("Mode definitions and token details"):
+        st.markdown(
+            "- **E1 — Current:** existing strict grounded prompt with the unchanged "
+            "Top-5 evidence.\n"
+            "- **E2 — Concise:** directness prompt and intent-based answer-length "
+            "policy with the unchanged Top-5 evidence.\n"
+            "- **E3 — Concise + selection:** E2 plus relevance-first evidence "
+            "selection. Original Top-5 retrieval remains unchanged in evaluation "
+            "logs."
+        )
+        st.dataframe(
+            [
+                {
+                    "Mode": version["experiment_id"].split("_", 1)[0],
+                    "Input tokens": version["metrics"].get("average_input_tokens"),
+                    "Output tokens": version["metrics"]["average_output_tokens"],
+                    "Total tokens": version["metrics"].get("average_total_tokens"),
+                    "Generation latency (s)": version["metrics"].get(
+                        "average_generation_latency_seconds"
+                    ),
+                    "Unsupported claims": version["metrics"].get(
+                        "unsupported_claims"
+                    ),
+                }
+                for version in versions
+            ],
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Input tokens": st.column_config.NumberColumn(format="%.1f"),
+                "Output tokens": st.column_config.NumberColumn(format="%.1f"),
+                "Total tokens": st.column_config.NumberColumn(format="%.1f"),
+                "Generation latency (s)": st.column_config.NumberColumn(
+                    format="%.3f"
+                ),
+            },
+        )
+        st.caption(
+            "Token averages use provider-reported usage when available; deterministic "
+            "refusals or answers may not invoke the model. Fixed model: "
+            f"{comparison.get('fixed_model', 'not recorded')}. Retrieval cache: "
+            f"{comparison.get('fixed_retrieval_cache_sha256', 'not recorded')}."
         )
     st.caption(f"Qwen comparison completed: {comparison['completed_at']}")
 
@@ -745,8 +887,14 @@ def render_qwen_generation_comparison() -> None:
 def render_experiment_dashboard() -> None:
     st.header("Experiment Dashboard")
     st.caption(
-        "Measured Phase 10 results across the same controlled evaluation dataset."
+        "Controlled evaluations across the same 15-question dataset. The latest "
+        "generation experiment is shown first."
     )
+
+    render_qwen_generation_comparison()
+
+    st.divider()
+    st.subheader("Phase 10 retrieval and workflow comparison")
     if not COMPARISON_PATH.is_file():
         st.info(
             "No final comparison is available yet. Run "
@@ -819,17 +967,16 @@ def render_experiment_dashboard() -> None:
         dashboard.recommendation_version_id,
     )
     st.success(
-        f"Recommended: {recommended_label}. "
+        f"Phase 10 retrieval/workflow recommendation: {recommended_label}. "
         f"{dashboard.recommendation_rationale}"
     )
     st.caption(f"Comparison completed: {dashboard.completed_at}")
 
     render_generation_model_comparison()
     render_claim_faithfulness_audit()
-    render_qwen_generation_comparison()
 
     st.divider()
-    st.subheader("Current app end-to-end")
+    st.subheader("Previous app end-to-end")
     st.caption(
         "Measured through the same answer path used by the Ask tab after the "
         "conversation, citation, deduplication, and plain-language corrections."
