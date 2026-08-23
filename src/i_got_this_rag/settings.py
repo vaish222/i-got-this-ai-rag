@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .grounded_generation import GENERATION_MODE_STRICT_FILTER, GENERATION_MODES
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -23,6 +25,7 @@ class Settings:
     top_k: int
     reference_date: str
     timezone: str
+    generation_mode: str = GENERATION_MODE_STRICT_FILTER
 
     @classmethod
     def from_environment(cls, project_root: Path) -> "Settings":
@@ -44,6 +47,10 @@ class Settings:
             top_k=int(os.getenv("RAG_TOP_K", "5")),
             reference_date=os.getenv("RAG_REFERENCE_DATE", "2026-08-20"),
             timezone=os.getenv("RAG_TIMEZONE", "America/Los_Angeles"),
+            generation_mode=os.getenv(
+                "RAG_GENERATION_MODE",
+                GENERATION_MODE_STRICT_FILTER,
+            ),
         )
         settings.validate()
         return settings
@@ -64,6 +71,9 @@ class Settings:
             raise ValueError("RAG_CHUNK_OVERLAP must be non-negative and smaller than RAG_CHUNK_SIZE.")
         if self.top_k < 5:
             raise ValueError("RAG_TOP_K must be at least 5 so evaluation can calculate Recall@5.")
+        if self.generation_mode not in GENERATION_MODES:
+            supported = ", ".join(sorted(GENERATION_MODES))
+            raise ValueError(f"RAG_GENERATION_MODE must be one of: {supported}.")
 
     def public_config(self) -> dict[str, Any]:
         config = asdict(self)

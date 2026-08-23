@@ -1,0 +1,6 @@
+experiment_id: C_strict_prompt_filter
+label: C. Strict prompt and relevance filtering
+generation_mode: strict_prompt_filter
+strict_grounding_prompt: true
+relevance_filtering: true
+

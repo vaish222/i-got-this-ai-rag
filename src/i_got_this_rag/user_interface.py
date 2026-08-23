@@ -15,6 +15,7 @@ from .conversation import (
     ConversationTurn,
 )
 from .evaluation import extract_citations, serialize_retrieval
+from .grounded_generation import GroundedAnswerItem, GroundedGeneration
 
 
 CLARIFICATION_TEXT = (
@@ -181,7 +182,7 @@ class QuestionAnsweringPipeline(Protocol):
         self,
         question: str,
         results: list[tuple[Document, float]],
-    ) -> str: ...
+    ) -> str | GroundedGeneration: ...
 
 
 class FollowUpQueryRewriter(Protocol):
@@ -207,6 +208,9 @@ class AnswerView:
     answer: str
     sources: tuple[SourceView, ...]
     used_conversation_context: bool
+    grounded_items: tuple[GroundedAnswerItem, ...] = ()
+    optional_suggestions: tuple[str, ...] = ()
+    generation_trace: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -882,6 +886,7 @@ def answer_question(
         results,
         reference_date,
     )
+    structured_generation: GroundedGeneration | None = None
     if is_pending_rsvp_question(rewrite.retrieval_question):
         generated_answer = build_pending_rsvp_answer(results)
     elif is_dated_meal_plan_question(
@@ -907,7 +912,12 @@ def answer_question(
         if generated_answer is None:
             generated_answer = WEEKLY_AGENDA_EMPTY_TEXT
     else:
-        generated_answer = pipeline.generate(rewrite.retrieval_question, results)
+        generated = pipeline.generate(rewrite.retrieval_question, results)
+        if isinstance(generated, GroundedGeneration):
+            structured_generation = generated
+            generated_answer = generated.answer
+        else:
+            generated_answer = generated
     answer = CitationAttributor().attribute(generated_answer, results)
     answer = expand_cited_section_headings(answer, results)
     answer = filter_answer_to_current_week(
@@ -960,4 +970,15 @@ def answer_question(
         answer=answer,
         sources=tuple(sources),
         used_conversation_context=rewrite.used_history,
+        grounded_items=(
+            structured_generation.items if structured_generation is not None else ()
+        ),
+        optional_suggestions=(
+            structured_generation.optional_suggestions
+            if structured_generation is not None
+            else ()
+        ),
+        generation_trace=(
+            structured_generation.trace() if structured_generation is not None else None
+        ),
     )

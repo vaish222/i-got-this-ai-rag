@@ -15,9 +15,17 @@ from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 
 from .settings import Settings
+from .grounded_generation import (
+    GENERATION_MODE_CURRENT,
+    GENERATION_MODE_STRICT,
+    GENERATION_MODE_STRICT_FILTER,
+    GENERATION_MODES,
+    GroundedGeneration,
+    REFUSAL_TEXT,
+    generate_strict_grounded_answer,
+)
 
 
-REFUSAL_TEXT = "I couldn't find that information in your knowledge base."
 DEFAULT_ANSWER_STYLE = "grounded_concise"
 PLAIN_LANGUAGE_ANSWER_STYLE = "plain_language"
 ANSWER_STYLE_INSTRUCTIONS = {
@@ -214,11 +222,16 @@ class BaselineRAG:
         resources: DenseRAGResources | None = None,
         vector_store: PineconeVectorStore | None = None,
         answer_style: str = DEFAULT_ANSWER_STYLE,
+        generation_mode: str | None = None,
     ) -> None:
         if answer_style not in ANSWER_STYLE_INSTRUCTIONS:
             raise ValueError(f"Unsupported answer style: {answer_style}")
         self.settings = settings
         self.answer_style = answer_style
+        self.generation_mode = generation_mode or settings.generation_mode
+        if self.generation_mode not in GENERATION_MODES:
+            raise ValueError(f"Unsupported generation mode: {self.generation_mode}")
+        self.last_generation_trace: dict[str, Any] | None = None
         self.resources = resources or DenseRAGResources.connect(settings)
         stats = self.resources.pinecone_index.describe_index_stats()
         namespace_stats = stats.namespaces.get(settings.pinecone_namespace)
@@ -237,11 +250,27 @@ class BaselineRAG:
     def retrieve(self, question: str) -> list[tuple[Document, float]]:
         return self.vector_store.similarity_search_with_score(question, k=self.settings.top_k)
 
-    def generate(self, question: str, results: list[tuple[Document, float]]) -> str:
-        return generate_grounded_answer(
-            self.settings,
-            self.resources.llm,
-            question,
-            results,
-            answer_style=self.answer_style,
+    def generate(
+        self,
+        question: str,
+        results: list[tuple[Document, float]],
+    ) -> str | GroundedGeneration:
+        self.last_generation_trace = None
+        if self.generation_mode == GENERATION_MODE_CURRENT:
+            return generate_grounded_answer(
+                self.settings,
+                self.resources.llm,
+                question,
+                results,
+                answer_style=self.answer_style,
+            )
+        generated = generate_strict_grounded_answer(
+            llm=self.resources.llm,
+            question=question,
+            results=results,
+            reference_date=self.settings.reference_date,
+            timezone=self.settings.timezone,
+            filter_context=self.generation_mode == GENERATION_MODE_STRICT_FILTER,
         )
+        self.last_generation_trace = generated.trace()
+        return generated

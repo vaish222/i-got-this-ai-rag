@@ -1,0 +1,6 @@
+experiment_id: A_current_generation
+label: A. Current generation
+generation_mode: current
+strict_grounding_prompt: false
+relevance_filtering: false
+

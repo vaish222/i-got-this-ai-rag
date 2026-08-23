@@ -316,6 +316,42 @@ Recall was unchanged versus the historical dense baseline. Strict faithfulness d
 
 The expanded local corpus currently produces 28 chunks, while the active `baseline` Pinecone namespace used by this run contains 20 vectors. Rebuild that namespace before interpreting this current-app artifact as a measurement of the newly added corpus content. The historical eight-version Phase 10 matrix remains tied to its original corpus fingerprint and should not be mixed with newly generated runtime versions from a different corpus.
 
+## Generation grounding ablation
+
+The generation ablation keeps embeddings, Pinecone, chunking, dense Top-5
+retrieval, the 15 evaluation questions, and application routing fixed. It compares:
+
+- **A — current:** the original prose generation prompt;
+- **B — strict prompt:** Pydantic structured facts with strict grounding rules; and
+- **C — strict prompt + filtering:** the same structured generator after deterministic
+  question-constraint extraction and direct-relevance filtering of the retrieved Top-5.
+
+Run all three configurations with:
+
+```bash
+uv run python evaluation/run_generation_experiments.py
+```
+
+The latest controlled run measured:
+
+| Configuration | Recall@5 | Faithfulness | Answer relevance/correctness | Correct refusal | Avg. latency | P95 latency |
+|---|---:|---:|---:|---:|---:|---:|
+| A — current | 0.900 | 0.200 | 0.262 | 1.000 | **1.502 s** | **4.231 s** |
+| B — strict prompt | 0.900 | **0.267** | **0.329** | 1.000 | 2.036 s | 8.738 s |
+| C — strict + filtering | 0.900 | **0.267** | 0.303 | 1.000 | 1.622 s | 5.343 s |
+
+Faithfulness remains the existing deterministic full-answer citation-grounding
+score. Answer relevance/correctness is deterministic token F1 between the confirmed
+facts and the expected answer. Optional suggestions are excluded from both factual
+sections and faithfulness scoring. C is the application default because it preserves
+the quality gain and exact refusal behavior while substantially reducing B's average
+and tail latency. It does not yet include a grounding-validator or retry loop.
+
+Each configuration is saved separately under
+`evaluation/results/generation_ablation/<experiment_id>/`, with a resolved
+`config.json` and per-question `results.json`. The combined metric and delta table is
+`evaluation/results/generation_ablation/comparison.json`.
+
 ## Phase boundary
 
 Phase 10 implements final cross-version evaluation. The Streamlit application in `app.py` provides both the simple user interface and a read-only dashboard over these measured results. RAG developer/debug mode, deployment, and all later phases remain intentionally unimplemented.

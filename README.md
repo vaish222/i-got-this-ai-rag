@@ -95,7 +95,12 @@ RAG_CHUNK_OVERLAP=75
 RAG_TOP_K=5
 RAG_REFERENCE_DATE=2026-08-20
 RAG_TIMEZONE=America/Los_Angeles
+RAG_GENERATION_MODE=strict_prompt_filter
 ```
+
+`RAG_GENERATION_MODE` accepts `current`, `strict_prompt`, or
+`strict_prompt_filter`. The default application mode uses the strict grounded
+prompt with retrieved-context relevance filtering.
 
 Keep Ollama running before indexing data or starting the application. On macOS,
 opening the Ollama application starts its local service; `ollama serve` can also be

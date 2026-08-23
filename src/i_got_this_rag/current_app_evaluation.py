@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 from langchain_core.documents import Document
 
+from .baseline import REFUSAL_TEXT
 from .conversation import ConversationQueryRewriter, ConversationTurn
 from .evaluation import (
     EvaluationDataset,
@@ -18,6 +19,8 @@ from .final_evaluation import (
     DeterministicFaithfulnessScorer,
     nearest_rank_percentile,
 )
+from .grounded_generation import GroundedGeneration
+from .retrieval import lexical_tokens
 from .user_interface import (
     ANONYMOUS_IDENTIFIER_PATTERN,
     CLARIFICATION_TEXT,
@@ -30,6 +33,11 @@ from .user_interface import (
 CURRENT_APP_EVALUATION_VERSION = "phase10-current-app-v2"
 CURRENT_APP_EXPERIMENT_ID = "E803_phase10_current_app"
 BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
+CORRECTNESS_STOP_WORDS = {
+    "a", "an", "and", "are", "at", "be", "by", "for", "from", "has",
+    "have", "in", "is", "it", "of", "on", "or", "the", "to", "with",
+    "your", "we", "what", "which", "when", "should", "need",
+}
 
 
 class CapturingPipeline:
@@ -40,6 +48,7 @@ class CapturingPipeline:
         self.settings = pipeline.settings
         self.resources = pipeline.resources
         self.last_results: list[tuple[Document, float]] = []
+        self.last_generation_trace: dict[str, Any] | None = None
 
     def retrieve(self, question: str) -> list[tuple[Document, float]]:
         self.last_results = self.pipeline.retrieve(question)
@@ -49,8 +58,53 @@ class CapturingPipeline:
         self,
         question: str,
         results: list[tuple[Document, float]],
-    ) -> str:
-        return self.pipeline.generate(question, results)
+    ) -> str | GroundedGeneration:
+        generated = self.pipeline.generate(question, results)
+        self.last_generation_trace = getattr(
+            self.pipeline,
+            "last_generation_trace",
+            None,
+        )
+        return generated
+
+
+def _confirmed_answer(answer: str) -> str:
+    confirmed = answer.split("\nOptional suggestions", maxsplit=1)[0].strip()
+    return re.sub(
+        r"^Confirmed from your information\s*\n?",
+        "",
+        confirmed,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def answer_relevance_correctness(
+    expected_answer: str,
+    generated_answer: str,
+    *,
+    answerable: bool,
+) -> float:
+    if not answerable:
+        return 1.0 if generated_answer.strip() == REFUSAL_TEXT else 0.0
+
+    def terms(value: str) -> set[str]:
+        return {
+            term
+            for term in lexical_tokens(value)
+            if len(term) > 1
+            and term not in CORRECTNESS_STOP_WORDS
+            and not re.fullmatch(r"s\d+", term)
+        }
+
+    expected = terms(expected_answer)
+    actual = terms(_confirmed_answer(generated_answer))
+    if not expected or not actual:
+        return 0.0
+    overlap = len(expected & actual)
+    precision = overlap / len(actual)
+    recall = overlap / len(expected)
+    return 2 * precision * recall / (precision + recall) if overlap else 0.0
 
 
 def _selected_results(
@@ -74,6 +128,7 @@ def evaluate_current_app(
 
     for question in dataset.questions:
         captured.last_results = []
+        captured.last_generation_trace = None
         started = perf_counter()
         response = answer_question(
             captured,
@@ -90,8 +145,13 @@ def evaluate_current_app(
         )
         faithfulness = scorer.score(
             answerable=bool(question["answerable"]),
-            answer=response.answer,
+            answer=_confirmed_answer(response.answer),
             results=results,
+        )
+        correctness = answer_relevance_correctness(
+            str(question["expected_answer"]),
+            response.answer,
+            answerable=bool(question["answerable"]),
         )
         citations = extract_citations(response.answer, retrieved_chunks)
         question_results.append(
@@ -111,6 +171,9 @@ def evaluate_current_app(
                 "citation_labels": [item["label"] for item in citations],
                 "citations": citations,
                 "faithfulness": faithfulness,
+                "answer_relevance_correctness": round(correctness, 6),
+                "generation_trace": response.generation_trace
+                or captured.last_generation_trace,
                 "total_latency_seconds": round(total_latency, 6),
             }
         )
@@ -138,6 +201,9 @@ def evaluate_current_app(
             "faithfulness": mean(
                 float(item["faithfulness"]["score"]) for item in items
             ),
+            "answer_relevance_correctness": mean(
+                float(item["answer_relevance_correctness"]) for item in items
+            ),
             "mean_total_latency_seconds": mean(
                 float(item["total_latency_seconds"]) for item in items
             ),
@@ -148,6 +214,10 @@ def evaluate_current_app(
             "recall_at_5": mean(float(item["recall_at_5"]) for item in answerable),
             "faithfulness": mean(
                 float(item["faithfulness"]["score"]) for item in question_results
+            ),
+            "answer_relevance_correctness": mean(
+                float(item["answer_relevance_correctness"])
+                for item in question_results
             ),
             "correct_refusal_rate": (
                 mean(

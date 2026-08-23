@@ -1,0 +1,6 @@
+experiment_id: B_strict_prompt
+label: B. Strict grounded prompt
+generation_mode: strict_prompt
+strict_grounding_prompt: true
+relevance_filtering: false
+
