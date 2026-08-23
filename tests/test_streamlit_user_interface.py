@@ -26,6 +26,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
 )
 from i_got_this_rag.user_interface import (  # noqa: E402
     answer_question,
+    expand_cited_section_headings,
     format_answer_for_display,
     humanize_anonymous_identifiers,
     normalize_question,
@@ -149,6 +150,7 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertIn("plain, everyday language", plain_prompt)
         self.assertIn("Never mention provided data", plain_prompt)
         self.assertIn("friend_child_01", plain_prompt)
+        self.assertIn("Never present a document title or section heading", plain_prompt)
         self.assertNotIn("plain, everyday language", default_prompt)
 
     def test_unknown_answer_style_is_rejected_before_model_call(self) -> None:
@@ -187,6 +189,82 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         )
 
         self.assertEqual(formatted, "Ask your neighbors 3 and the coordinator 4.")
+
+    def test_cited_section_heading_expands_to_its_concrete_commitments(self) -> None:
+        pipeline = FakePipeline("- **Open commitments** [S4]")
+        pipeline.results = [
+            (
+                Document(
+                    page_content="unrelated",
+                    metadata={
+                        "document_id": f"unrelated_{index}",
+                        "document_title": f"Unrelated {index}",
+                        "chunk_id": f"unrelated_{index}::chunk_000",
+                        "source_path": f"data/unrelated_{index}.md",
+                    },
+                ),
+                0.9 - index / 10,
+            )
+            for index in range(1, 4)
+        ]
+        pipeline.results.append(
+            (
+                Document(
+                    page_content="""# Social Commitments and Follow-ups
+
+## Open commitments
+
+- **Neighborhood potluck, Sunday, August 23:** `adult_01` promised to bake lemon bars; the RSVP is pending.
+- **Dinner with `friend_family_02`, Saturday, August 29:** reply by Monday, August 24.
+- **Coffee with `colleague_01`:** suggest two September dates by August 28.
+
+## Completed follow-ups
+
+- Confirmed birthday-party attendance.
+""",
+                    metadata={
+                        "document_id": "social_003",
+                        "document_title": "Social Commitments and Follow-ups",
+                        "chunk_id": "social_003::chunk_000",
+                        "source_path": "data/sample/social/social_commitments.md",
+                    },
+                ),
+                0.55,
+            )
+        )
+
+        response = answer_question(pipeline, "What do I still need to do?")
+
+        self.assertNotIn("- **Open commitments**", response.answer)
+        self.assertIn("Neighborhood potluck", response.answer)
+        self.assertIn("Dinner with your friends", response.answer)
+        self.assertIn("Coffee with your colleague", response.answer)
+        self.assertNotIn("friend_family_02", response.answer)
+        self.assertEqual(response.answer.count("[S4]"), 3)
+        self.assertEqual(
+            [source.title for source in response.sources],
+            ["Social Commitments and Follow-ups"],
+        )
+
+    def test_uncited_or_unknown_heading_is_not_expanded(self) -> None:
+        results = [
+            (
+                Document(
+                    page_content="## Open commitments\n\n- Send the RSVP.",
+                    metadata={},
+                ),
+                0.8,
+            )
+        ]
+
+        self.assertEqual(
+            expand_cited_section_headings("- Open commitments", results),
+            "- Open commitments",
+        )
+        self.assertEqual(
+            expand_cited_section_headings("- Unknown section [S1]", results),
+            "- Unknown section [S1]",
+        )
 
     def test_pending_rsvp_answer_excludes_unrelated_action_items(self) -> None:
         pipeline = FakePipeline(

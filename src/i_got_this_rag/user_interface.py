@@ -62,6 +62,12 @@ MARKDOWN_SECTION_PATTERN = re.compile(
     r"^##\s+(?P<heading>.+?)\s*$\n(?P<body>.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL,
 )
+BARE_SECTION_ITEM_PATTERN = re.compile(
+    r"^(?P<indent>\s*)(?P<bullet>[-*+])\s+"
+    r"(?P<title>.+?)\s*\[(?P<label>S(?P<rank>\d+))\]\s*$",
+    re.IGNORECASE,
+)
+SOURCE_BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
 
 
 class QuestionAnsweringPipeline(Protocol):
@@ -132,6 +138,65 @@ def format_answer_for_display(answer: str) -> str:
     if answer.strip() == REFUSAL_TEXT:
         return answer
     return humanize_anonymous_identifiers(remove_data_preamble(answer))
+
+
+def _normalized_heading(value: str) -> str:
+    cleaned = _clean_markdown_value(value)
+    cleaned = re.sub(r"^\*+|\*+$", "", cleaned).strip()
+    return " ".join(cleaned.casefold().split())
+
+
+def _section_bullets(document: Document, heading: str) -> tuple[str, ...] | None:
+    target = _normalized_heading(heading)
+    for section in MARKDOWN_SECTION_PATTERN.finditer(document.page_content):
+        if _normalized_heading(section.group("heading")) != target:
+            continue
+        bullets = tuple(
+            match.group(1).strip()
+            for line in section.group("body").splitlines()
+            if (match := SOURCE_BULLET_PATTERN.match(line))
+        )
+        return bullets
+    return None
+
+
+def expand_cited_section_headings(
+    answer: str,
+    results: list[tuple[Document, float]],
+) -> str:
+    expanded_lines: list[str] = []
+    changed = False
+    for line in answer.splitlines():
+        match = BARE_SECTION_ITEM_PATTERN.match(line)
+        if match is None:
+            expanded_lines.append(line)
+            continue
+
+        rank = int(match.group("rank"))
+        if not 1 <= rank <= len(results):
+            expanded_lines.append(line)
+            continue
+        bullets = _section_bullets(results[rank - 1][0], match.group("title"))
+        if bullets is None:
+            expanded_lines.append(line)
+            continue
+
+        changed = True
+        for bullet_text in bullets:
+            citation = (
+                ""
+                if re.search(r"\[S\d+\]", bullet_text, re.IGNORECASE)
+                else f" [{match.group('label').upper()}]"
+            )
+            expanded_lines.append(
+                f"{match.group('indent')}{match.group('bullet')} "
+                f"{bullet_text}{citation}"
+            )
+
+    expanded = "\n".join(expanded_lines).strip()
+    if changed and not expanded:
+        return REFUSAL_TEXT
+    return expanded
 
 
 def is_pending_rsvp_question(question: str) -> bool:
@@ -254,6 +319,7 @@ def answer_question(
         else pipeline.generate(rewrite.retrieval_question, results)
     )
     answer = CitationAttributor().attribute(generated_answer, results)
+    answer = expand_cited_section_headings(answer, results)
     answer = format_answer_for_display(answer)
     retrieved_chunks = serialize_retrieval(results)
     chunks_by_rank = {int(chunk["rank"]): chunk for chunk in retrieved_chunks}

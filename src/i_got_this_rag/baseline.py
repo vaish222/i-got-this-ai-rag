@@ -29,6 +29,7 @@ ANSWER_STYLE_INSTRUCTIONS = {
 Start with the answer itself. Never mention provided data, retrieved data, sources, context, records, or a knowledge base in the introduction.
 Use a brief natural opening only when it helps, followed by clear bullets or day-by-day sections for lists and schedules.
 Turn anonymous role IDs into readable descriptions in the answer: for example, friend_child_01 becomes "your friend's child", relative_01 becomes "your relative", and child_01 becomes "your child". Never invent a real name. Keep a distinguishing number only when multiple people would otherwise have the same description.
+Never present a document title or section heading, such as "Open commitments", as an answer item. Include the concrete entries beneath that heading instead.
 Keep the answer practical and concise while including relevant dates, times, statuses, and action items.""",
 }
 
