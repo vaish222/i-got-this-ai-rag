@@ -104,7 +104,15 @@ The Streamlit app opts into a plain-language answer style: answers begin directl
 
 If the small local model omits citations, the existing deterministic citation attributor adds a source label only when the claim's concrete facts and informative terms match retrieved evidence; unsupported claims never receive a fabricated citation. The interface then displays only sources actually cited in the answer. Connection and configuration failures are shown in the page instead of crashing it.
 
-The Experiments tab reads `evaluation/results/phase10_final/comparison.json`; it never launches or reruns experiments. If that artifact is unavailable, the page provides the Phase 10 runner command needed to generate it. The dashboard includes the measured configuration matrix, Recall@5, strict faithfulness, average latency, the selected recommendation, and a per-experiment PRD trade-off analysis.
+The Experiments tab reads the historical eight-version comparison from `evaluation/results/phase10_final/comparison.json` and the optional current-app measurement from `evaluation/results/phase10_current_app/results.json`; it never launches or reruns experiments. If an artifact is unavailable, the page provides its runner command. The dashboard preserves the original Phase 10 retrieval matrix while presenting the current Streamlit answer path separately, including Recall@5, strict faithfulness, correct refusal rate, average and p95 latency, historical-baseline deltas, and seven corrected-behavior checks.
+
+Regenerate the current-app measurement after changing answer routing, citations, conversation behavior, or display normalization:
+
+```bash
+uv run python evaluation/run_current_app_evaluation.py
+```
+
+The latest measured run retained `0.900` Recall@5 and `1.000` correct refusal, measured `0.200` strict faithfulness, `1.752 s` average latency, `4.475 s` p95 latency, and passed five of seven corrected-behavior checks. The two remaining measured failures are the duplicate RSVP aggregation and a refused standalone “next volunteer work” query; the dashboard exposes both rather than treating the corrections as complete.
 
 The application intentionally has no live configuration editor, retrieval diagnostics, or RAG developer/debug mode.
 

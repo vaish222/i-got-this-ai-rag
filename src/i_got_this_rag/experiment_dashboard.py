@@ -72,6 +72,37 @@ class ExperimentDashboard:
         return next(detail for detail in self.details if detail.version_id == version_id)
 
 
+@dataclass(frozen=True)
+class CurrentAppBenchmark:
+    completed_at: str
+    experiment_id: str
+    recall_at_5: float
+    faithfulness: float
+    correct_refusal_rate: float
+    average_latency_seconds: float
+    p95_latency_seconds: float
+    recall_delta: float
+    faithfulness_delta: float
+    average_latency_delta_seconds: float
+    regression_passed_count: int
+    regression_case_count: int
+    regression_pass_rate: float
+    regression_cases: tuple[dict[str, Any], ...]
+
+    def table_record(self) -> dict[str, str | float]:
+        return {
+            "System": "Current Streamlit app",
+            "Recall@5": self.recall_at_5,
+            "Faithfulness": self.faithfulness,
+            "Correct refusal": self.correct_refusal_rate,
+            "Avg. latency (s)": self.average_latency_seconds,
+            "P95 latency (s)": self.p95_latency_seconds,
+            "UI regressions": (
+                f"{self.regression_passed_count}/{self.regression_case_count}"
+            ),
+        }
+
+
 COMMON_CONSTANTS = (
     "20-document controlled corpus; 500/75 chunks; final Top-5 context; "
     "gemma3:1b generation; the same 15 evaluation questions and reference date."
@@ -273,4 +304,35 @@ def load_experiment_dashboard(path: Path) -> ExperimentDashboard:
         ),
         recommendation_version_id=str(recommendation["selected_version_id"]),
         recommendation_rationale=str(recommendation["rationale"]),
+    )
+
+
+def load_current_app_benchmark(path: Path) -> CurrentAppBenchmark:
+    payload = json.loads(path.resolve().read_text(encoding="utf-8"))
+    if payload.get("phase") != 10:
+        raise ValueError("The current-app benchmark requires a Phase 10 artifact.")
+    if payload.get("evaluation_version") != "phase10-current-app-v1":
+        raise ValueError("Unsupported current-app evaluation version.")
+    metrics = payload.get("metrics")
+    regressions = payload.get("ui_regressions")
+    deltas = payload.get("delta_vs_historical_baseline")
+    if not isinstance(metrics, dict) or not isinstance(regressions, dict):
+        raise ValueError("Current-app metrics or UI regressions are missing.")
+    if not isinstance(deltas, dict) or not isinstance(regressions.get("cases"), list):
+        raise ValueError("Current-app comparison details are missing.")
+    return CurrentAppBenchmark(
+        completed_at=str(payload["completed_at"]),
+        experiment_id=str(payload["experiment_id"]),
+        recall_at_5=float(metrics["recall_at_5"]),
+        faithfulness=float(metrics["faithfulness"]),
+        correct_refusal_rate=float(metrics["correct_refusal_rate"]),
+        average_latency_seconds=float(metrics["average_latency_seconds"]),
+        p95_latency_seconds=float(metrics["p95_latency_seconds"]),
+        recall_delta=float(deltas["recall_at_5"]),
+        faithfulness_delta=float(deltas["faithfulness"]),
+        average_latency_delta_seconds=float(deltas["average_latency_seconds"]),
+        regression_passed_count=int(regressions["passed_count"]),
+        regression_case_count=int(regressions["case_count"]),
+        regression_pass_rate=float(regressions["pass_rate"]),
+        regression_cases=tuple(regressions["cases"]),
     )

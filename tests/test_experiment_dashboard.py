@@ -12,6 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     EXPERIMENT_PROFILES,
+    load_current_app_benchmark,
     load_experiment_dashboard,
 )
 
@@ -112,6 +113,49 @@ class ExperimentDashboardTests(unittest.TestCase):
             payload["phase"] = 9
             with self.assertRaisesRegex(ValueError, "Phase 10"):
                 load_experiment_dashboard(self.write_payload(directory, payload))
+
+    def test_current_app_benchmark_loads_measured_metrics_and_regressions(self) -> None:
+        payload = {
+            "phase": 10,
+            "evaluation_version": "phase10-current-app-v1",
+            "experiment_id": "E803_phase10_current_app",
+            "completed_at": "2026-08-23T06:00:00+00:00",
+            "metrics": {
+                "recall_at_5": 0.9,
+                "faithfulness": 0.8,
+                "correct_refusal_rate": 1.0,
+                "average_latency_seconds": 1.2,
+                "p95_latency_seconds": 2.5,
+            },
+            "delta_vs_historical_baseline": {
+                "recall_at_5": 0.0,
+                "faithfulness": 0.4,
+                "average_latency_seconds": -0.25,
+            },
+            "ui_regressions": {
+                "passed_count": 7,
+                "case_count": 7,
+                "pass_rate": 1.0,
+                "cases": [
+                    {
+                        "case_id": "UI001",
+                        "question": "What's next?",
+                        "passed": True,
+                        "failures": [],
+                        "latency_seconds": 0.001,
+                    }
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            benchmark = load_current_app_benchmark(path)
+
+        self.assertEqual(benchmark.experiment_id, "E803_phase10_current_app")
+        self.assertEqual(benchmark.faithfulness, 0.8)
+        self.assertEqual(benchmark.regression_passed_count, 7)
+        self.assertEqual(benchmark.table_record()["UI regressions"], "7/7")
 
 
 if __name__ == "__main__":

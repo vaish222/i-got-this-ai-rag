@@ -296,6 +296,24 @@ evaluation/results/phase10_final/
 
 The historical source experiments were executed at different times, so the latency column is useful for observed cost comparison but is not a simultaneous benchmark.
 
+### Current Streamlit app measurement
+
+The historical eight-version comparison remains immutable. To measure the application after changing conversation handling, deterministic answers, citation repair, deduplication, or plain-language display, run:
+
+```bash
+uv run python evaluation/run_current_app_evaluation.py
+```
+
+This evaluates the selected dense pipeline through the same `answer_question()` path used by the Ask tab. It runs the original 15 questions for direct comparison and seven targeted UI regression scenarios, then writes `evaluation/results/phase10_current_app/results.json` for the Experiments tab.
+
+The latest measured results are:
+
+| System | Recall@5 | Strict faithfulness | Correct refusal | Avg. latency | P95 latency | UI regressions |
+|---|---:|---:|---:|---:|---:|---:|
+| Current Streamlit app | 0.900 | 0.200 | 1.000 | 1.752 s | 4.475 s | 5/7 |
+
+Recall was unchanged versus the historical dense baseline. Strict faithfulness decreased by `0.200`, and average latency increased by `0.298 s`. The weekly summary, volunteer-week answer, clarification response, additive volunteer follow-up, and birthday humanization checks passed. Pending RSVP aggregation still duplicated an open-commitments section, and the standalone “When is my next volunteer work planned?” regression returned a safe refusal instead of a sourced answer. These are reported as remaining gaps, not silently excluded from the measurement.
+
 ## Phase boundary
 
 Phase 10 implements final cross-version evaluation. The Streamlit application in `app.py` provides both the simple user interface and a read-only dashboard over these measured results. RAG developer/debug mode, deployment, and all later phases remain intentionally unimplemented.
