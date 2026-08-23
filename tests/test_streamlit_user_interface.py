@@ -28,6 +28,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
 from i_got_this_rag.user_interface import (  # noqa: E402
     AnswerView,
     answer_question,
+    build_weekly_agenda_answer,
     build_volunteer_week_answer,
     expand_cited_section_headings,
     filter_answer_to_current_week,
@@ -189,6 +190,24 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertIn("your elementary-school child", formatted)
         self.assertNotIn("_0", formatted)
         self.assertNotIn("According to the data", formatted)
+
+    def test_display_formatter_humanizes_spaced_and_possessive_ids(self) -> None:
+        answer = (
+            "Okay, here’s a breakdown based solely on the provided data:\n\n"
+            "- Child 01's mathematics diagnostic\n"
+            "- Adult 01’s practical AI class\n"
+            "- Adult 02 at the welcome table"
+        )
+
+        formatted = format_answer_for_display(answer)
+
+        self.assertIn("your middle-school child's mathematics diagnostic", formatted)
+        self.assertIn("one adult in your household’s practical AI class", formatted)
+        self.assertIn("another adult in your household at the welcome table", formatted)
+        self.assertNotIn("Child 01", formatted)
+        self.assertNotIn("Adult 01", formatted)
+        self.assertNotIn("Adult 02", formatted)
+        self.assertNotIn("provided data", formatted)
 
     def test_unknown_anonymous_id_is_still_rendered_as_a_readable_role(self) -> None:
         formatted = humanize_anonymous_identifiers(
@@ -413,7 +432,8 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertIn('[data-testid="stchatinput"] textarea', style)
         self.assertTrue(
             any(
-                "<h1>Hi," in item.value and "What’s next?</h1>" in item.value
+                "<h1>✨ I GOT THIS. What’s next?</h1>" in item.value
+                and "<h2>Hi," in item.value
                 for item in app.markdown
             )
         )
@@ -574,6 +594,112 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertNotIn("September 9", selected[0][0].page_content)
         self.assertNotIn("August 24", selected[1][0].page_content)
         self.assertIn("Sunday's neighborhood potluck", selected[1][0].page_content)
+
+    def test_weekly_agenda_is_deduplicated_and_uses_calendar_dates(self) -> None:
+        results = [
+            (
+                Document(
+                    page_content="""# Family Schedule
+
+## Friday, August 21
+
+- 8:30–9:15 AM — `child_01`: mathematics diagnostic
+- Noon — neighborhood potluck RSVP deadline
+
+## Saturday, August 22
+
+- 3:00–5:00 PM — `child_02`: `friend_child_01` birthday party""",
+                    metadata={
+                        "document_id": "family_001",
+                        "document_type": "family_calendar",
+                        "document_title": "Family Schedule",
+                        "chunk_id": "family_001::chunk_000",
+                        "source_path": "data/sample/family/family_schedule.md",
+                    },
+                ),
+                0.95,
+            ),
+            (
+                Document(
+                    page_content="""## Friday, August 21
+
+- Noon — neighborhood potluck RSVP deadline
+
+## Sunday, August 23
+
+- 5:00–7:00 PM — family: neighborhood potluck; `adult_02` at welcome table at 4:50 PM""",
+                    metadata={
+                        "document_id": "family_001",
+                        "document_type": "family_calendar",
+                        "document_title": "Family Schedule",
+                        "chunk_id": "family_001::chunk_001",
+                        "source_path": "data/sample/family/family_schedule.md",
+                    },
+                ),
+                0.9,
+            ),
+        ]
+
+        answer = build_weekly_agenda_answer(results, "2026-08-20")
+
+        self.assertIsNotNone(answer)
+        assert answer is not None
+        self.assertEqual(answer.count("**Friday, August 21**"), 1)
+        self.assertEqual(answer.count("potluck RSVP deadline"), 1)
+        self.assertIn("Noon — neighborhood potluck RSVP deadline [S1]", answer)
+        self.assertIn("**Sunday, August 23**", answer)
+        self.assertIn("neighborhood potluck; adult_02 at welcome table", answer)
+
+    def test_weekly_agenda_bypasses_free_form_generation(self) -> None:
+        pipeline = FakePipeline(
+            "This Week:\n- Child 01's diagnostic.\n\n"
+            "This Week:\n- Adult 01’s class. [S1]"
+        )
+        pipeline.results = [
+            (
+                Document(
+                    page_content="""# Family Schedule
+
+## Thursday, August 20
+
+- 7:00–8:15 PM — `adult_01`: Practical AI live class from home
+
+## Friday, August 21
+
+- Noon — neighborhood potluck RSVP deadline
+
+## Saturday, August 22
+
+- 3:00–5:00 PM — `child_02`: `friend_child_01` birthday party""",
+                    metadata={
+                        "document_id": "family_001",
+                        "document_type": "family_calendar",
+                        "document_title": "Family Schedule",
+                        "chunk_id": "family_001::chunk_000",
+                        "source_path": "data/sample/family/family_schedule.md",
+                    },
+                ),
+                0.95,
+            )
+        ]
+
+        response = answer_question(
+            pipeline,
+            "What's coming up this week?",
+            reference_date="2026-08-20",
+        )
+
+        self.assertEqual(pipeline.questions, [response.question])
+        self.assertEqual(response.answer.count("Here’s what’s coming up this week:"), 1)
+        self.assertIn("one adult in your household", response.answer)
+        self.assertNotIn("Adult 01", response.answer)
+        self.assertIn("Friday, August 21", response.answer)
+        self.assertIn(
+            "your friend's child's birthday party for your elementary-school child",
+            response.answer,
+        )
+        self.assertNotIn("friend_child_01", response.answer)
+        self.assertEqual(len(response.sources), 1)
 
     def test_out_of_week_answer_items_are_removed(self) -> None:
         answer = (

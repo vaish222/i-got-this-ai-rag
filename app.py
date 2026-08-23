@@ -393,9 +393,9 @@ def render_app() -> None:
     st.markdown(
         f"""
         <div class="igt-hero">
-            <div class="igt-brand">✨ I GOT THIS</div>
-            <h1>Hi, {name}! What’s next?</h1>
-            <p>Your colorful command center for family plans, promises, and everything in between.</p>
+            <h1>✨ I GOT THIS. What’s next?</h1>
+            <h2>Hi, {name}!</h2>
+            <p>Your command center for family plans, promises, and everything in between.It helps turn that daily mental clutter into one clear view of what matters now, what’s coming next, and what still needs attention</p>
         </div>
         """,
         unsafe_allow_html=True,

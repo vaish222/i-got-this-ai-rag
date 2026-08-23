@@ -20,7 +20,8 @@ from .evaluation import extract_citations, serialize_retrieval
 ANONYMOUS_IDENTIFIER_PATTERN = re.compile(
     r"`?(?P<identifier>"
     r"(?:adult|child|friend|relative|neighbor|mentee|coordinator|colleague)"
-    r"(?:_[a-z]+)*_\d{2})`?",
+    r"(?:(?:_|\s+)[a-z]+)*(?:_|\s+)\d{2})`?"
+    r"(?P<possessive>['’]s)?",
     re.IGNORECASE,
 )
 IDENTIFIER_ALIASES = {
@@ -49,10 +50,18 @@ EVENT_HEADING_ALIASES = {
     "friend_family_02 dinner": "Dinner with your friends",
     "friend_child_01 birthday party": "Your friend's child's birthday party",
 }
+FRIEND_CHILD_BIRTHDAY_PATTERN = re.compile(
+    r"`?friend(?:_|\s+)child(?:_|\s+)01`?\s+birthday party",
+    re.IGNORECASE,
+)
 DATA_PREAMBLE_PATTERN = re.compile(
-    r"^\s*(?:(?:according to|based on)\s+"
-    r"(?:the\s+)?(?:provided\s+|retrieved\s+)?"
-    r"(?:data|context|sources|records),?\s*)",
+    r"^\s*(?:"
+    r"(?:(?:according to|based on)\s+(?:the\s+)?"
+    r"(?:provided\s+|retrieved\s+)?(?:data|context|sources|records),?\s*)"
+    r"|(?:okay,?\s+)?here(?:'|’)s\s+[^\n]*?"
+    r"based\s+(?:solely\s+)?on\s+(?:the\s+)?(?:provided\s+|retrieved\s+)?"
+    r"(?:data|context|sources|records)\s*:?\s*"
+    r")",
     re.IGNORECASE,
 )
 PENDING_RSVP_PATTERN = re.compile(
@@ -75,6 +84,27 @@ VOLUNTEER_QUESTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 THIS_WEEK_PATTERN = re.compile(r"\bthis week\b", re.IGNORECASE)
+WEEKLY_AGENDA_QUESTION_PATTERN = re.compile(
+    r"\b(?:coming up|what(?:'|’)s next|scheduled|schedule|happening)\b",
+    re.IGNORECASE,
+)
+SCHEDULE_DAY_HEADING_PATTERN = re.compile(
+    r"^#{2,3}\s+(?P<label>"
+    r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+"
+    r"(?:January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+\d{1,2}(?:,\s+20\d{2})?"
+    r")\s*$",
+    re.IGNORECASE,
+)
+SCHEDULE_BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(?P<item>.+?)\s*$")
+SCHEDULE_LEADING_IDENTIFIER_PATTERN = re.compile(
+    r"^(?P<prefix>.+?—\s+)"
+    r"(?P<identifier>"
+    r"(?:adult|child|friend|relative|neighbor|mentee|coordinator|colleague)"
+    r"(?:(?:_|\s+)[a-z]+)*(?:_|\s+)\d{2})"
+    r"(?::\s*|\s+)(?P<action>.+)$",
+    re.IGNORECASE,
+)
 WEEKDAY_PATTERN = re.compile(
     r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b",
     re.IGNORECASE,
@@ -161,6 +191,15 @@ class PendingRSVPItem:
     deadline: str | None
     note: str | None
     source_label: str
+
+
+@dataclass(frozen=True)
+class WeeklyAgendaItem:
+    scheduled_date: date
+    day_label: str
+    description: str
+    source_label: str
+    source_order: int
 
 
 def _reference_date(value: str | date | None) -> date | None:
@@ -281,6 +320,133 @@ def is_volunteer_week_question(question: str) -> bool:
     )
 
 
+def is_weekly_agenda_question(question: str) -> bool:
+    return bool(
+        THIS_WEEK_PATTERN.search(question)
+        and WEEKLY_AGENDA_QUESTION_PATTERN.search(question)
+        and not VOLUNTEER_QUESTION_PATTERN.search(question)
+    )
+
+
+def _is_family_calendar(document: Document) -> bool:
+    document_type = str(document.metadata.get("document_type", "")).casefold()
+    document_id = str(document.metadata.get("document_id", "")).casefold()
+    raw_tags = document.metadata.get("tags", ())
+    if isinstance(raw_tags, str):
+        tags = {item.strip().casefold() for item in raw_tags.split(",")}
+    else:
+        tags = {str(item).casefold() for item in raw_tags}
+    return (
+        document_type == "family_calendar"
+        or document_id == "family_001"
+        or "weekly_schedule" in tags
+    )
+
+
+def _schedule_item_sort_key(item: WeeklyAgendaItem) -> tuple[date, int, int]:
+    time_match = re.match(
+        r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?"
+        r"(?:\s*[–-]\s*\d{1,2}(?::\d{2})?)?\s*"
+        r"(?P<period>AM|PM)\b",
+        _clean_markdown_value(item.description),
+        re.IGNORECASE,
+    )
+    if time_match:
+        hour = int(time_match.group("hour")) % 12
+        if time_match.group("period").casefold() == "pm":
+            hour += 12
+        minutes = hour * 60 + int(time_match.group("minute") or 0)
+    elif re.match(r"noon\b", item.description, re.IGNORECASE):
+        minutes = 12 * 60
+    elif re.match(r"afternoon\b", item.description, re.IGNORECASE):
+        minutes = 13 * 60
+    elif re.match(r"evening\b", item.description, re.IGNORECASE):
+        minutes = 18 * 60
+    else:
+        minutes = 24 * 60
+    return item.scheduled_date, minutes, item.source_order
+
+
+def _weekly_agenda_items(
+    results: list[tuple[Document, float]],
+    reference_date: str | date | None,
+) -> tuple[WeeklyAgendaItem, ...]:
+    reference = _reference_date(reference_date)
+    if reference is None:
+        return ()
+    start, end = _week_bounds(reference)
+    items: list[WeeklyAgendaItem] = []
+    seen: set[tuple[date, str]] = set()
+    source_order = 0
+
+    for rank, (document, _) in enumerate(results, start=1):
+        if not _is_family_calendar(document):
+            continue
+        current_date: date | None = None
+        current_label: str | None = None
+        for raw_line in document.page_content.splitlines():
+            heading = SCHEDULE_DAY_HEADING_PATTERN.match(raw_line.strip())
+            if heading:
+                parsed_dates = _explicit_dates(heading.group("label"), reference)
+                candidate = parsed_dates[0] if parsed_dates else None
+                if candidate is not None and start <= candidate <= end:
+                    current_date = candidate
+                    current_label = heading.group("label")
+                else:
+                    current_date = None
+                    current_label = None
+                continue
+
+            bullet = SCHEDULE_BULLET_PATTERN.match(raw_line)
+            if bullet is None or current_date is None or current_label is None:
+                continue
+            description = _clean_markdown_value(bullet.group("item"))
+            leading_identifier = SCHEDULE_LEADING_IDENTIFIER_PATTERN.match(
+                description
+            )
+            if leading_identifier:
+                description = (
+                    f"{leading_identifier.group('prefix')}"
+                    f"{leading_identifier.group('action')} for "
+                    f"{leading_identifier.group('identifier')}"
+                )
+            normalized = re.sub(r"\W+", " ", description.casefold()).strip()
+            item_key = (current_date, normalized)
+            if not normalized or item_key in seen:
+                continue
+            seen.add(item_key)
+            items.append(
+                WeeklyAgendaItem(
+                    scheduled_date=current_date,
+                    day_label=current_label,
+                    description=description,
+                    source_label=f"S{rank}",
+                    source_order=source_order,
+                )
+            )
+            source_order += 1
+
+    return tuple(sorted(items, key=_schedule_item_sort_key))
+
+
+def build_weekly_agenda_answer(
+    results: list[tuple[Document, float]],
+    reference_date: str | date | None,
+) -> str | None:
+    items = _weekly_agenda_items(results, reference_date)
+    if not items:
+        return None
+
+    lines = ["Here’s what’s coming up this week:"]
+    previous_date: date | None = None
+    for item in items:
+        if item.scheduled_date != previous_date:
+            lines.extend(("", f"**{item.day_label}**"))
+            previous_date = item.scheduled_date
+        lines.append(f"- {item.description} [{item.source_label}]")
+    return "\n".join(lines)
+
+
 def _volunteer_week_items(
     results: list[tuple[Document, float]],
     reference_date: str | date | None,
@@ -356,15 +522,25 @@ def build_volunteer_week_answer(
 
 def humanize_anonymous_identifiers(answer: str) -> str:
     def replace_identifier(match: re.Match[str]) -> str:
-        identifier = match.group("identifier").casefold()
+        identifier = re.sub(
+            r"(?:_|\s+)+",
+            "_",
+            match.group("identifier").casefold(),
+        )
         direct_alias = IDENTIFIER_ALIASES.get(identifier)
         if direct_alias is not None:
-            return direct_alias
-        role, raw_number = identifier.rsplit("_", 1)
-        role_alias = ROLE_ALIASES.get(role, f"the {role.replace('_', ' ')}")
-        return f"{role_alias} {int(raw_number)}"
+            replacement = direct_alias
+        else:
+            role, raw_number = identifier.rsplit("_", 1)
+            role_alias = ROLE_ALIASES.get(role, f"the {role.replace('_', ' ')}")
+            replacement = f"{role_alias} {int(raw_number)}"
+        return f"{replacement}{match.group('possessive') or ''}"
 
-    return ANONYMOUS_IDENTIFIER_PATTERN.sub(replace_identifier, answer)
+    readable_events = FRIEND_CHILD_BIRTHDAY_PATTERN.sub(
+        "your friend's child's birthday party",
+        answer,
+    )
+    return ANONYMOUS_IDENTIFIER_PATTERN.sub(replace_identifier, readable_events)
 
 
 def remove_data_preamble(answer: str) -> str:
@@ -574,6 +750,10 @@ def answer_question(
             history,
             reference_date,
         )
+    elif is_weekly_agenda_question(rewrite.retrieval_question):
+        generated_answer = build_weekly_agenda_answer(results, reference_date)
+        if generated_answer is None:
+            generated_answer = pipeline.generate(rewrite.retrieval_question, results)
     else:
         generated_answer = pipeline.generate(rewrite.retrieval_question, results)
     answer = CitationAttributor().attribute(generated_answer, results)
