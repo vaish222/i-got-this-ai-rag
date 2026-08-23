@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Protocol, Sequence
 
 from langchain_core.documents import Document
@@ -9,6 +10,7 @@ from langchain_core.documents import Document
 from .agentic_rag import CitationAttributor
 from .baseline import REFUSAL_TEXT
 from .conversation import (
+    ADDITIVE_FOLLOW_UP_PATTERN,
     ConversationRewrite,
     ConversationTurn,
 )
@@ -68,6 +70,53 @@ BARE_SECTION_ITEM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SOURCE_BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
+VOLUNTEER_QUESTION_PATTERN = re.compile(
+    r"\b(?:volunteer(?:ing)?|mentor(?:ing)?)\b",
+    re.IGNORECASE,
+)
+THIS_WEEK_PATTERN = re.compile(r"\bthis week\b", re.IGNORECASE)
+WEEKDAY_PATTERN = re.compile(
+    r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b",
+    re.IGNORECASE,
+)
+VOLUNTEER_WEEK_ACTION_PATTERN = re.compile(
+    r"\b(?:due|session|comments?|bring|enter|welcome table|cover|volunteer)\b",
+    re.IGNORECASE,
+)
+ISO_DATE_PATTERN = re.compile(r"\b(?P<year>20\d{2})-(?P<month>\d{2})-(?P<day>\d{2})\b")
+MONTH_DATE_PATTERN = re.compile(
+    r"\b(?P<month>January|February|March|April|May|June|July|August|"
+    r"September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|"
+    r"Sep|Sept|Oct|Nov|Dec)\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?"
+    r"(?:,?\s+(?P<year>20\d{2}))?\b",
+    re.IGNORECASE,
+)
+MONTH_NUMBERS = {
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
+}
 
 
 class QuestionAnsweringPipeline(Protocol):
@@ -112,6 +161,197 @@ class PendingRSVPItem:
     deadline: str | None
     note: str | None
     source_label: str
+
+
+def _reference_date(value: str | date | None) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _explicit_dates(text: str, reference: date) -> tuple[date, ...]:
+    found: list[date] = []
+    occupied: list[tuple[int, int]] = []
+    for match in ISO_DATE_PATTERN.finditer(text):
+        try:
+            found.append(
+                date(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                )
+            )
+            occupied.append(match.span())
+        except ValueError:
+            continue
+
+    for match in MONTH_DATE_PATTERN.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in occupied):
+            continue
+        month = MONTH_NUMBERS[match.group("month").casefold()]
+        year = int(match.group("year") or reference.year)
+        try:
+            found.append(date(year, month, int(match.group("day"))))
+        except ValueError:
+            continue
+    return tuple(dict.fromkeys(found))
+
+
+def _week_bounds(reference: date) -> tuple[date, date]:
+    start = reference - timedelta(days=reference.weekday())
+    return start, start + timedelta(days=6)
+
+
+def _filter_document_to_week(document: Document, reference: date) -> Document | None:
+    start, end = _week_bounds(reference)
+    blocks = re.split(r"\n\s*\n", document.page_content)
+    kept_blocks: list[str] = []
+    for block in blocks:
+        dates = _explicit_dates(block, reference)
+        if dates and not any(start <= value <= end for value in dates):
+            continue
+        if block.strip():
+            kept_blocks.append(block.strip())
+    if not kept_blocks:
+        return None
+    return Document(
+        page_content="\n\n".join(kept_blocks),
+        metadata=dict(document.metadata),
+    )
+
+
+def select_relevant_ui_results(
+    question: str,
+    results: list[tuple[Document, float]],
+    reference_date: str | date | None = None,
+) -> list[tuple[Document, float]]:
+    selected = results
+    if VOLUNTEER_QUESTION_PATTERN.search(question):
+        volunteer_results = [
+            (document, score)
+            for document, score in results
+            if str(document.metadata.get("domain", "")).casefold() == "volunteer"
+            or str(document.metadata.get("document_id", "")).casefold().startswith(
+                "volunteer_"
+            )
+        ]
+        if volunteer_results:
+            selected = volunteer_results
+
+    reference = _reference_date(reference_date)
+    if reference is None or not THIS_WEEK_PATTERN.search(question):
+        return selected
+
+    filtered: list[tuple[Document, float]] = []
+    for document, score in selected:
+        narrowed = _filter_document_to_week(document, reference)
+        if narrowed is not None:
+            filtered.append((narrowed, score))
+    return filtered or selected
+
+
+def filter_answer_to_current_week(
+    answer: str,
+    question: str,
+    reference_date: str | date | None,
+) -> str:
+    reference = _reference_date(reference_date)
+    if reference is None or not THIS_WEEK_PATTERN.search(question):
+        return answer
+
+    start, end = _week_bounds(reference)
+    kept_lines: list[str] = []
+    for line in answer.splitlines():
+        dates = _explicit_dates(line, reference)
+        if dates and not any(start <= value <= end for value in dates):
+            continue
+        kept_lines.append(line)
+    return "\n".join(kept_lines).strip()
+
+
+def is_volunteer_week_question(question: str) -> bool:
+    return bool(
+        VOLUNTEER_QUESTION_PATTERN.search(question)
+        and THIS_WEEK_PATTERN.search(question)
+    )
+
+
+def _volunteer_week_items(
+    results: list[tuple[Document, float]],
+    reference_date: str | date | None,
+) -> tuple[tuple[str, str], ...]:
+    reference = _reference_date(reference_date)
+    if reference is None:
+        return ()
+    start, end = _week_bounds(reference)
+    items: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for rank, (document, _) in enumerate(results, start=1):
+        domain = str(document.metadata.get("domain", "")).casefold()
+        document_id = str(document.metadata.get("document_id", "")).casefold()
+        if domain != "volunteer" and not document_id.startswith("volunteer_"):
+            continue
+        for raw_line in document.page_content.splitlines():
+            line = raw_line.strip().removeprefix("-").strip()
+            if not line or not VOLUNTEER_WEEK_ACTION_PATTERN.search(line):
+                continue
+            dates = _explicit_dates(line, reference)
+            has_in_week_date = any(start <= value <= end for value in dates)
+            if not has_in_week_date and not WEEKDAY_PATTERN.search(line):
+                continue
+            lowered = line.casefold()
+            if "optional" in lowered or ("complete" in lowered and "pending" not in lowered):
+                continue
+            cleaned = _clean_markdown_value(line)
+            normalized = re.sub(r"\W+", " ", cleaned.casefold()).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            items.append((cleaned, f"S{rank}"))
+    return tuple(items)
+
+
+def _display_normalized(value: str) -> str:
+    readable = humanize_anonymous_identifiers(_clean_markdown_value(value))
+    return re.sub(r"\W+", " ", readable.casefold()).strip()
+
+
+def build_volunteer_week_answer(
+    question: str,
+    results: list[tuple[Document, float]],
+    history: Sequence[ConversationTurn],
+    reference_date: str | date | None,
+) -> str:
+    items = _volunteer_week_items(results, reference_date)
+    if not items:
+        return REFUSAL_TEXT
+
+    is_additive = bool(ADDITIVE_FOLLOW_UP_PATTERN.search(question))
+    if is_additive and history:
+        previous_answer = _display_normalized(history[-1].assistant_answer)
+        items = tuple(
+            (item, label)
+            for item, label in items
+            if _display_normalized(item) not in previous_answer
+        )
+        if not items:
+            labels = "".join(
+                f"[S{rank}]" for rank in range(1, len(results) + 1)
+            )
+            return (
+                "I couldn't find any additional volunteer work due this week "
+                f"beyond what was already listed. {labels}"
+            ).strip()
+
+    label = "other volunteer commitments" if is_additive else "volunteer commitments"
+    lines = [f"{len(items)} {label} are scheduled or due this week:"]
+    lines.extend(f"- {item} [{source_label}]" for item, source_label in items)
+    return "\n".join(lines)
 
 
 def humanize_anonymous_identifiers(answer: str) -> str:
@@ -298,6 +538,7 @@ def answer_question(
     question: str,
     history: Sequence[ConversationTurn] = (),
     rewriter: FollowUpQueryRewriter | None = None,
+    reference_date: str | date | None = None,
 ) -> AnswerView:
     normalized = normalize_question(question)
     if history:
@@ -313,15 +554,44 @@ def answer_question(
             guard_repairs=(),
         )
     results = pipeline.retrieve(rewrite.retrieval_question)
-    generated_answer = (
-        build_pending_rsvp_answer(results)
-        if is_pending_rsvp_question(rewrite.retrieval_question)
-        else pipeline.generate(rewrite.retrieval_question, results)
+    if reference_date is None:
+        reference_date = getattr(
+            getattr(pipeline, "settings", None),
+            "reference_date",
+            None,
+        )
+    results = select_relevant_ui_results(
+        rewrite.retrieval_question,
+        results,
+        reference_date,
     )
+    if is_pending_rsvp_question(rewrite.retrieval_question):
+        generated_answer = build_pending_rsvp_answer(results)
+    elif is_volunteer_week_question(rewrite.retrieval_question):
+        generated_answer = build_volunteer_week_answer(
+            normalized,
+            results,
+            history,
+            reference_date,
+        )
+    else:
+        generated_answer = pipeline.generate(rewrite.retrieval_question, results)
     answer = CitationAttributor().attribute(generated_answer, results)
     answer = expand_cited_section_headings(answer, results)
-    answer = format_answer_for_display(answer)
+    answer = filter_answer_to_current_week(
+        answer,
+        rewrite.retrieval_question,
+        reference_date,
+    )
     retrieved_chunks = serialize_retrieval(results)
+    resolved_citations = [
+        citation
+        for citation in extract_citations(answer, retrieved_chunks)
+        if citation.get("resolved")
+    ]
+    if not answer or (answer.strip() != REFUSAL_TEXT and not resolved_citations):
+        answer = REFUSAL_TEXT
+    answer = format_answer_for_display(answer)
     chunks_by_rank = {int(chunk["rank"]): chunk for chunk in retrieved_chunks}
 
     sources: list[SourceView] = []

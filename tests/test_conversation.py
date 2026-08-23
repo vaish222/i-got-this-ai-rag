@@ -13,6 +13,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
     ConversationQueryRewriter,
     ConversationTurn,
     format_conversation_history,
+    inherit_additive_follow_up_scope,
     recent_turns,
     requires_conversation_context,
 )
@@ -91,6 +92,60 @@ class ConversationTests(unittest.TestCase):
         self.assertFalse(
             requires_conversation_context("What should I prepare for this weekend?")
         )
+
+    def test_additive_follow_up_inherits_previous_time_and_status_scope(self) -> None:
+        llm = FakeLLM("unused")
+        rewriter = ConversationQueryRewriter(llm, "2026-08-20", "America/Los_Angeles")
+        history = (
+            ConversationTurn(
+                "What volunteer work is due this week?",
+                "The September 5 clothing collection was listed.",
+            ),
+        )
+
+        result = rewriter.rewrite("Is there any other volunteer work?", history)
+
+        self.assertEqual(
+            result.retrieval_question,
+            "Is there any other volunteer work due this week?",
+        )
+        self.assertTrue(result.used_history)
+        self.assertEqual(llm.prompts, [])
+        self.assertEqual(
+            result.guard_repairs,
+            (
+                {
+                    "reason": "inherited_previous_question_scope",
+                    "inherited_terms": ["due", "this week"],
+                },
+            ),
+        )
+
+    def test_additive_scope_helper_leaves_complete_scope_unchanged(self) -> None:
+        question = "Are there any other volunteer deadlines this week?"
+
+        scoped, inherited = inherit_additive_follow_up_scope(
+            question,
+            (ConversationTurn("Which volunteer deadlines are this week?", "One."),),
+        )
+
+        self.assertEqual(scoped, question)
+        self.assertEqual(inherited, ())
+
+    def test_complete_additive_follow_up_bypasses_model_rewrite(self) -> None:
+        llm = FakeLLM("Okay, I understand.")
+        rewriter = ConversationQueryRewriter(llm, "2026-08-20", "America/Los_Angeles")
+        question = "Are there any other volunteer deadlines this week?"
+
+        result = rewriter.rewrite(
+            question,
+            (ConversationTurn("Which volunteer deadlines are this week?", "One."),),
+        )
+
+        self.assertEqual(result.retrieval_question, question)
+        self.assertTrue(result.used_history)
+        self.assertEqual(result.guard_repairs, ())
+        self.assertEqual(llm.prompts, [])
 
     def test_history_can_resolve_a_follow_up_reference(self) -> None:
         llm = FakeLLM(

@@ -18,6 +18,10 @@ from .query_transformation import (
 CONVERSATION_REWRITE_VERSION = "streamlit-conversation-v2"
 DEFAULT_MEMORY_EXCHANGES = 3
 MAX_MESSAGE_CHARACTERS = 1500
+ADDITIVE_FOLLOW_UP_PATTERN = re.compile(
+    r"\b(?:other|else|more|additional|another)\b",
+    re.IGNORECASE,
+)
 FOLLOW_UP_REFERENCE_PATTERNS = (
     re.compile(r"\b(?:it|they|them|their|there|that|those|these)\b", re.IGNORECASE),
     re.compile(
@@ -26,6 +30,7 @@ FOLLOW_UP_REFERENCE_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(r"^\s*(?:and|also|what about|how about)\b", re.IGNORECASE),
+    ADDITIVE_FOLLOW_UP_PATTERN,
     re.compile(
         r"^\s*what\s+(?:else\s+)?(?:should|do|can|could)\s+(?:i|we)\s+"
         r"(?:bring|prepare|pack|buy|send|do)\s*\??\s*$",
@@ -91,6 +96,25 @@ def requires_conversation_context(question: str) -> bool:
     return any(pattern.search(question) for pattern in FOLLOW_UP_REFERENCE_PATTERNS)
 
 
+def inherit_additive_follow_up_scope(
+    question: str,
+    history: Sequence[ConversationTurn],
+) -> tuple[str, tuple[str, ...]]:
+    if not history or not ADDITIVE_FOLLOW_UP_PATTERN.search(question):
+        return question, ()
+
+    previous_terms = extract_protected_terms(history[-1].user_question)
+    lowered = question.casefold()
+    inherited = tuple(
+        term for term in previous_terms if term.casefold() not in lowered
+    )
+    if not inherited:
+        return question, ()
+
+    stem = question.strip().rstrip("?.!").strip()
+    return f"{stem} {' '.join(inherited)}?", inherited
+
+
 class ConversationQueryRewriter:
     def __init__(
         self,
@@ -112,6 +136,26 @@ class ConversationQueryRewriter:
         history: Sequence[ConversationTurn],
     ) -> ConversationRewrite:
         selected_history = recent_turns(history, self.memory_exchanges)
+        scoped_question, inherited_terms = inherit_additive_follow_up_scope(
+            question,
+            selected_history,
+        )
+        if selected_history and ADDITIVE_FOLLOW_UP_PATTERN.search(question):
+            repairs: tuple[dict[str, Any], ...] = ()
+            if inherited_terms:
+                repairs = (
+                    {
+                        "reason": "inherited_previous_question_scope",
+                        "inherited_terms": list(inherited_terms),
+                    },
+                )
+            return ConversationRewrite(
+                original_question=question,
+                retrieval_question=scoped_question,
+                used_history=True,
+                raw_output=None,
+                guard_repairs=repairs,
+            )
         if not selected_history or not requires_conversation_context(question):
             return ConversationRewrite(
                 original_question=question,

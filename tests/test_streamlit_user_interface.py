@@ -28,10 +28,13 @@ from i_got_this_rag.conversation import (  # noqa: E402
 from i_got_this_rag.user_interface import (  # noqa: E402
     AnswerView,
     answer_question,
+    build_volunteer_week_answer,
     expand_cited_section_headings,
+    filter_answer_to_current_week,
     format_answer_for_display,
     humanize_anonymous_identifiers,
     normalize_question,
+    select_relevant_ui_results,
 )
 
 
@@ -39,6 +42,7 @@ class FakePipeline:
     def __init__(self, answer: str) -> None:
         self.answer = answer
         self.questions: list[str] = []
+        self.generation_results: list[list[tuple[Document, float]]] = []
         self.results = [
             (
                 Document(
@@ -77,6 +81,7 @@ class FakePipeline:
         results: list[tuple[Document, float]],
     ) -> str:
         self.questions.append(question)
+        self.generation_results.append(results)
         return self.answer
 
 
@@ -504,14 +509,178 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertEqual(response.sources[0].label, "S1")
         self.assertEqual(response.sources[0].title, "Elementary School Newsletter")
 
-    def test_unsupported_uncited_answer_does_not_receive_false_citation(self) -> None:
+    def test_unsupported_uncited_answer_becomes_safe_refusal(self) -> None:
         response = answer_question(
             FakePipeline("The field trip form is due Monday."),
             "When is the field trip form due?",
         )
 
-        self.assertNotIn("[S", response.answer)
+        self.assertEqual(response.answer, REFUSAL_TEXT)
         self.assertEqual(response.sources, ())
+
+    def test_conversational_filler_becomes_safe_refusal(self) -> None:
+        response = answer_question(
+            FakePipeline("Okay, I understand. Let's proceed with that information."),
+            "Is there any other volunteer work?",
+        )
+
+        self.assertEqual(response.answer, REFUSAL_TEXT)
+        self.assertEqual(response.sources, ())
+
+    def test_volunteer_week_scope_filters_domain_and_out_of_week_blocks(self) -> None:
+        results = [
+            (
+                Document(
+                    page_content=(
+                        "Donate the clothing box during the September 5 collection."
+                    ),
+                    metadata={"document_id": "household_002", "domain": "household"},
+                ),
+                0.95,
+            ),
+            (
+                Document(
+                    page_content=(
+                        "Comments are due Friday, August 21 at 6:00 PM.\n\n"
+                        "The next group meeting is September 9 at 6:30 PM."
+                    ),
+                    metadata={"document_id": "volunteer_001", "domain": "volunteer"},
+                ),
+                0.85,
+            ),
+            (
+                Document(
+                    page_content=(
+                        "The newsletter draft is due Monday, August 24 at noon.\n\n"
+                        "Cover Sunday's neighborhood potluck welcome table."
+                    ),
+                    metadata={"document_id": "volunteer_002", "domain": "volunteer"},
+                ),
+                0.8,
+            ),
+        ]
+
+        selected = select_relevant_ui_results(
+            "What volunteer work is due this week?",
+            results,
+            "2026-08-20",
+        )
+
+        self.assertEqual(
+            [document.metadata["document_id"] for document, _ in selected],
+            ["volunteer_001", "volunteer_002"],
+        )
+        self.assertIn("August 21", selected[0][0].page_content)
+        self.assertNotIn("September 9", selected[0][0].page_content)
+        self.assertNotIn("August 24", selected[1][0].page_content)
+        self.assertIn("Sunday's neighborhood potluck", selected[1][0].page_content)
+
+    def test_out_of_week_answer_items_are_removed(self) -> None:
+        answer = (
+            "Volunteer work due this week:\n\n"
+            "- Comments are due Friday, August 21 at 6:00 PM. [S1]\n"
+            "- Donate clothing during the September 5 collection. [S2]"
+        )
+
+        filtered = filter_answer_to_current_week(
+            answer,
+            "What volunteer work is due this week?",
+            "2026-08-20",
+        )
+
+        self.assertIn("August 21", filtered)
+        self.assertNotIn("September 5", filtered)
+
+    def test_volunteer_week_answer_is_deterministic_and_tracks_other_items(self) -> None:
+        results = [
+            (
+                Document(
+                    page_content="""The next mentoring session is **Saturday, August 22, from 11:00 AM–12:00 PM** by video call.
+
+- Add comments to the question list by **Friday, August 21 at 6:00 PM**.
+- Bring two examples of behavioral questions to Saturday's call.
+- Enter a short session note by **Sunday, August 23 at 6:00 PM**.
+
+The next group meeting is September 9 at 6:30 PM.""",
+                    metadata={"document_id": "volunteer_001", "domain": "volunteer"},
+                ),
+                0.9,
+            ),
+            (
+                Document(
+                    page_content=(
+                        "At Sunday's neighborhood potluck, `adult_02` will cover "
+                        "the welcome table from **4:50–5:00 PM**."
+                    ),
+                    metadata={"document_id": "volunteer_002", "domain": "volunteer"},
+                ),
+                0.8,
+            ),
+        ]
+        selected = select_relevant_ui_results(
+            "What volunteer work is due this week?",
+            results,
+            "2026-08-20",
+        )
+
+        first = build_volunteer_week_answer(
+            "What volunteer work is due this week?",
+            selected,
+            (),
+            "2026-08-20",
+        )
+        second = build_volunteer_week_answer(
+            "Is there any other volunteer work?",
+            selected,
+            (
+                ConversationTurn(
+                    "What volunteer work is due this week?",
+                    format_answer_for_display(first),
+                ),
+            ),
+            "2026-08-20",
+        )
+
+        self.assertIn("5 volunteer commitments", first)
+        self.assertIn("August 22", first)
+        self.assertIn("August 21", first)
+        self.assertIn("August 23", first)
+        self.assertIn("welcome table", first)
+        self.assertNotIn("September 9", first)
+        self.assertEqual(first.count("[S1]"), 4)
+        self.assertEqual(first.count("[S2]"), 1)
+        self.assertIn("any additional volunteer work", second)
+        self.assertIn("[S1][S2]", second)
+
+    def test_additive_volunteer_answer_lists_items_missing_from_previous_answer(self) -> None:
+        results = [
+            (
+                Document(
+                    page_content=(
+                        "Add comments by Friday, August 21 at 6:00 PM.\n"
+                        "Bring examples to Saturday's mentoring session."
+                    ),
+                    metadata={"document_id": "volunteer_001", "domain": "volunteer"},
+                ),
+                0.9,
+            )
+        ]
+
+        answer = build_volunteer_week_answer(
+            "Is there any other volunteer work?",
+            results,
+            (
+                ConversationTurn(
+                    "What volunteer work is due this week?",
+                    "The September 5 clothing collection was listed.",
+                ),
+            ),
+            "2026-08-20",
+        )
+
+        self.assertIn("2 other volunteer commitments", answer)
+        self.assertIn("August 21", answer)
+        self.assertIn("Saturday's mentoring session", answer)
 
     def test_duplicate_and_unresolved_citations_are_not_displayed(self) -> None:
         pipeline = FakePipeline("The form is due Friday [S1][S1][S9].")
