@@ -304,15 +304,17 @@ The historical eight-version comparison remains immutable. To measure the applic
 uv run python evaluation/run_current_app_evaluation.py
 ```
 
-This evaluates the selected dense pipeline through the same `answer_question()` path used by the Ask tab. It runs the original 15 questions for direct comparison and seven targeted UI regression scenarios, then writes `evaluation/results/phase10_current_app/results.json` for the Experiments tab.
+This evaluates the selected dense pipeline through the same `answer_question()` path used by the Ask tab. It runs the original 15 questions for direct comparison and nine targeted UI regression scenarios, then writes `evaluation/results/phase10_current_app/results.json` for the Experiments tab. The regression set includes deterministic weekly planning and exact dated meal-plan checks.
 
 The latest measured results are:
 
 | System | Recall@5 | Strict faithfulness | Correct refusal | Avg. latency | P95 latency | UI regressions |
 |---|---:|---:|---:|---:|---:|---:|
-| Current Streamlit app | 0.900 | 0.200 | 1.000 | 1.752 s | 4.475 s | 5/7 |
+| Current Streamlit app | 0.900 | 0.200 | 1.000 | 1.536 s | 4.252 s | 7/9 |
 
-Recall was unchanged versus the historical dense baseline. Strict faithfulness decreased by `0.200`, and average latency increased by `0.298 s`. The weekly summary, volunteer-week answer, clarification response, additive volunteer follow-up, and birthday humanization checks passed. Pending RSVP aggregation still duplicated an open-commitments section, and the standalone “When is my next volunteer work planned?” regression returned a safe refusal instead of a sourced answer. These are reported as remaining gaps, not silently excluded from the measurement.
+Recall was unchanged versus the historical dense baseline. Strict faithfulness decreased by `0.200`, and average latency increased by `0.083 s`. The weekly summary, “Plan my week,” exact Sunday meal plan, volunteer-week answer, clarification response, additive volunteer follow-up, and birthday humanization checks passed. Pending RSVP aggregation still duplicated an open-commitments section, and the standalone “When is my next volunteer work planned?” regression returned a safe refusal instead of a sourced answer. These are reported as remaining gaps, not silently excluded from the measurement.
+
+The expanded local corpus currently produces 28 chunks, while the active `baseline` Pinecone namespace used by this run contains 20 vectors. Rebuild that namespace before interpreting this current-app artifact as a measurement of the newly added corpus content. The historical eight-version Phase 10 matrix remains tied to its original corpus fingerprint and should not be mixed with newly generated runtime versions from a different corpus.
 
 ## Phase boundary
 

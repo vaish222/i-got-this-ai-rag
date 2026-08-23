@@ -27,7 +27,7 @@ from .user_interface import (
 )
 
 
-CURRENT_APP_EVALUATION_VERSION = "phase10-current-app-v1"
+CURRENT_APP_EVALUATION_VERSION = "phase10-current-app-v2"
 CURRENT_APP_EXPERIMENT_ID = "E803_phase10_current_app"
 BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
 
@@ -314,6 +314,33 @@ def evaluate_ui_regressions(pipeline: Any) -> dict[str, Any]:
         failures.append("standalone volunteer answer has no resolved source")
     results.append(_case_result("UI007", question, response, failures, latency))
 
+    question = "Plan my week."
+    response, latency = ask(question)
+    failures = []
+    if response.answer.count("Here’s what’s coming up this week:") != 1:
+        failures.append("weekly planning phrase does not use the weekly agenda")
+    if "**Friday, August 21**" not in response.answer:
+        failures.append("weekly plan is missing Friday, August 21")
+    if "Monday, August 24" in response.answer or "September" in response.answer:
+        failures.append("weekly plan includes an event outside the requested week")
+    if _duplicate_bullets(response.answer):
+        failures.append("weekly plan includes duplicate events")
+    results.append(_case_result("UI008", question, response, failures, latency))
+
+    question = "What is the meal plan for Sunday?"
+    response, latency = ask(question)
+    failures = []
+    normalized_answer = response.answer.casefold()
+    if "neighborhood potluck" not in normalized_answer:
+        failures.append("Sunday meal plan omits the neighborhood potluck")
+    if "family is bringing lemon bars" not in normalized_answer:
+        failures.append("Sunday meal plan omits the preparation note")
+    if "sheet-pan chicken" in normalized_answer or "robotics" in normalized_answer:
+        failures.append("Sunday meal plan includes Saturday's meal row")
+    if not response.sources:
+        failures.append("Sunday meal plan has no resolved source")
+    results.append(_case_result("UI009", question, response, failures, latency))
+
     passed = sum(bool(item["passed"]) for item in results)
     return {
         "case_count": len(results),
@@ -338,4 +365,3 @@ def historical_baseline_delta(
         "average_latency_seconds": float(metrics["average_latency_seconds"])
         - float(baseline["average_latency_seconds"]),
     }
-

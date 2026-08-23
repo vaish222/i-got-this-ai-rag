@@ -64,7 +64,7 @@ def main() -> None:
     pipeline = BaselineRAG(settings, answer_style=PLAIN_LANGUAGE_ANSWER_STYLE)
     print("Running the current app over the 15 Phase 10 questions...")
     evaluation = evaluate_current_app(pipeline, dataset)
-    print("Running seven corrected-behavior regression scenarios...")
+    print("Running corrected-behavior regression scenarios...")
     regressions = evaluate_ui_regressions(pipeline)
 
     documents = load_corpus(settings.data_dir, PROJECT_ROOT)

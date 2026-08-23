@@ -117,7 +117,7 @@ class ExperimentDashboardTests(unittest.TestCase):
     def test_current_app_benchmark_loads_measured_metrics_and_regressions(self) -> None:
         payload = {
             "phase": 10,
-            "evaluation_version": "phase10-current-app-v1",
+            "evaluation_version": "phase10-current-app-v2",
             "experiment_id": "E803_phase10_current_app",
             "completed_at": "2026-08-23T06:00:00+00:00",
             "metrics": {
@@ -134,8 +134,8 @@ class ExperimentDashboardTests(unittest.TestCase):
             },
             "ui_regressions": {
                 "passed_count": 7,
-                "case_count": 7,
-                "pass_rate": 1.0,
+                "case_count": 9,
+                "pass_rate": 7 / 9,
                 "cases": [
                     {
                         "case_id": "UI001",
@@ -155,7 +155,8 @@ class ExperimentDashboardTests(unittest.TestCase):
         self.assertEqual(benchmark.experiment_id, "E803_phase10_current_app")
         self.assertEqual(benchmark.faithfulness, 0.8)
         self.assertEqual(benchmark.regression_passed_count, 7)
-        self.assertEqual(benchmark.table_record()["UI regressions"], "7/7")
+        self.assertEqual(benchmark.regression_case_count, 9)
+        self.assertEqual(benchmark.table_record()["UI regressions"], "7/9")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,8 @@ from i_got_this_rag.user_interface import (  # noqa: E402
     CLARIFICATION_TEXT,
     AnswerView,
     SourceView,
+    build_dated_meal_plan_answer,
+    WEEKLY_AGENDA_EMPTY_TEXT,
     answer_question,
     build_weekly_agenda_answer,
     build_volunteer_week_answer,
@@ -465,11 +467,18 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertIn('[class*="st-key-answer_category_volunteer_"]', style)
         self.assertIn('[class*="st-key-answer_category_social_"]', style)
         self.assertIn('[class*="st-key-answer_category_family_"]', style)
+        self.assertIn('[class*="st-key-answer_daily_card_"]', style)
+        self.assertIn('[class*="st-key-answer_event_row_"]', style)
+        self.assertIn("border-left: 6px solid var(--igt-orange)", style)
+        self.assertIn("font-size: 1.18rem", style)
+        self.assertIn(".igt-category-chip", style)
+        self.assertIn(".igt-action-chip", style)
+        self.assertIn(".igt-time-chip", style)
         self.assertIn('[data-baseweb="tab"] *', style)
         self.assertIn('[data-testid="stchatinput"] textarea', style)
         self.assertTrue(
             any(
-                "<h1>✨ I GOT THIS.</h1>" in item.value
+                "<h1>✨ I GOT THIS. What’s next?</h1>" in item.value
                 and "<h4>24 hours." in item.value
                 for item in app.markdown
             )
@@ -488,10 +497,10 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             {button.label for button in app.button},
             {
                 "↻ New conversation",
-                "📅 What's coming up this week?",
+                "⏭️ What's coming up this week?",
                 "💌 Which invitations still need an RSVP?",
                 "🎒 What should I prepare for this weekend?",
-                "🎁 Which birthdays still need gifts?",
+                "📅 Plan my week.",
             },
         )
         self.assertEqual([tab.label for tab in app.tabs], ["Ask", "Experiments"])
@@ -514,10 +523,10 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             {button.label for button in app.button},
             {
                 "↻ New conversation",
-                "📅 What's coming up this week?",
+                "⏭️ What's coming up this week?",
                 "💌 Which invitations still need an RSVP?",
                 "🎒 What should I prepare for this weekend?",
-                "🎁 Which birthdays still need gifts?",
+                "📅 Plan my week.",
             },
         )
         self.assertEqual(len(app.chat_message), 2)
@@ -604,6 +613,87 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         ):
             self.assertIn(f"**Source {index}: {category}**", rendered)
 
+    def test_dated_agenda_renders_one_day_card_with_compact_event_chips(
+        self,
+    ) -> None:
+        response = AnswerView(
+            question="Plan my week",
+            retrieval_question="Plan my week",
+            answer=(
+                "Here’s what’s coming up this week:\n\n"
+                "**Friday, August 21**\n"
+                "- 8:30–9:15 AM — mathematics diagnostic for your "
+                "middle-school child [S1]\n"
+                "- Noon — neighborhood potluck RSVP deadline [S1]\n"
+                "- 4:30–5:00 PM — piano lesson for your elementary-school "
+                "child [S1]\n"
+                "- 5:00 PM — emergency contact verification deadline for your "
+                "middle-school child [S1]\n"
+                "- 6:00 PM — mentor question-list comments due [S1]"
+            ),
+            sources=(
+                SourceView(
+                    label="S1",
+                    title="Family Schedule",
+                    source_path="data/sample/family/family_schedule.md",
+                    page_number=None,
+                ),
+            ),
+            used_conversation_context=False,
+        )
+        app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
+        app.session_state["conversation"] = [response]
+
+        app.run(timeout=20)
+
+        self.assertEqual(app.exception, [])
+        rendered = [item.value for item in app.chat_message[1].markdown]
+        joined = "\n".join(rendered)
+        self.assertEqual(rendered.count("### Friday, August 21"), 1)
+        self.assertEqual(joined.count("igt-chip-school"), 2)
+        self.assertEqual(joined.count("igt-chip-social"), 1)
+        self.assertEqual(joined.count("igt-chip-kids"), 1)
+        self.assertEqual(joined.count("igt-chip-volunteer"), 1)
+        self.assertIn("ACTION NEEDED", joined)
+        self.assertIn("DEADLINE", joined)
+        self.assertIn("igt-time-chip", joined)
+        self.assertIn("8:30–9:15 AM", joined)
+        self.assertIn("4:30–5:00 PM", joined)
+        self.assertNotIn("**🏫 School**", rendered)
+
+    def test_cited_household_source_wins_over_incidental_activity_word(
+        self,
+    ) -> None:
+        response = AnswerView(
+            question="What is the meal plan for Sunday?",
+            retrieval_question="What is the meal plan for Sunday?",
+            answer=(
+                "**Sunday, August 23**\n"
+                "- **Dinner:** Sheet-pan chicken and vegetables [S1]\n"
+                "- **Preparation:** Prepare vegetables during robotics class [S1]"
+            ),
+            sources=(
+                SourceView(
+                    label="S1",
+                    title="Family Meal Plan",
+                    source_path="data/sample/household/meal_plan.md",
+                    page_number=None,
+                ),
+            ),
+            used_conversation_context=False,
+        )
+        app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
+        app.session_state["conversation"] = [response]
+
+        app.run(timeout=20)
+
+        self.assertEqual(app.exception, [])
+        rendered = "\n".join(
+            item.value for item in app.chat_message[1].markdown
+        )
+        self.assertEqual(rendered.count("igt-chip-household"), 2)
+        self.assertNotIn("igt-chip-kids", rendered)
+
     def test_uncited_section_bullets_inherit_household_card_context(self) -> None:
         response = AnswerView(
             question="What should I prepare for this weekend?",
@@ -645,14 +735,18 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             for value in rendered
             if "HVAC Service" in value or "Library Returns" in value
         ]
-        self.assertEqual(len(household_blocks), 1)
-        self.assertIn("HVAC Service", household_blocks[0])
-        self.assertIn("Library Returns", household_blocks[0])
-        self.assertIn("Meal Prep", household_blocks[0])
-        self.assertIn("**🏠 Household**", rendered)
-        self.assertIn("**🎉 Social**", rendered)
-        self.assertIn("**Saturday - August 22nd:**", rendered)
-        self.assertIn("**Sunday - August 23rd:**", rendered)
+        self.assertEqual(len(household_blocks), 2)
+        self.assertIn("HVAC Service", "\n".join(household_blocks))
+        self.assertIn("Library Returns", "\n".join(household_blocks))
+        self.assertIn("Meal Prep", "\n".join(rendered))
+        self.assertTrue(
+            any("igt-chip-household" in value and "🏠 Household" in value for value in rendered)
+        )
+        self.assertTrue(
+            any("igt-chip-social" in value and "🎉 Social" in value for value in rendered)
+        )
+        self.assertIn("### Saturday - August 22nd", rendered)
+        self.assertIn("### Sunday - August 23rd", rendered)
         self.assertNotIn("[S", "\n".join(rendered))
         self.assertIn(
             "**Source 1: Home Tasks and Maintenance**",
@@ -914,6 +1008,153 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         )
         self.assertNotIn("friend_child_01", response.answer)
         self.assertEqual(len(response.sources), 1)
+
+    def test_plan_my_week_uses_deterministic_weekly_agenda(self) -> None:
+        pipeline = FakePipeline(
+            "Monday, August 24 — invented school event. [S1]"
+        )
+        pipeline.results = [
+            (
+                Document(
+                    page_content="""# Family Schedule
+
+## Friday, August 21
+
+- 4:30–5:00 PM — `child_02`: piano lesson
+
+## Saturday, August 22
+
+- 9:00–10:15 AM — `child_01`: swim practice; arrive 8:45 AM
+- 1:00–2:30 PM — `child_01`: solar-rover workshop
+
+## Monday, August 24
+
+- 8:00 AM — event outside the requested week""",
+                    metadata={
+                        "document_id": "family_001",
+                        "document_type": "family_calendar",
+                        "document_title": "Family Schedule",
+                        "chunk_id": "family_001::chunk_000",
+                        "source_path": "data/sample/family/family_schedule.md",
+                    },
+                ),
+                0.95,
+            ),
+            (
+                Document(
+                    page_content="""## Saturday, August 22
+
+- 9:00–10:15 AM — `child_01`: swim practice; arrive 8:45 AM""",
+                    metadata={
+                        "document_id": "family_001",
+                        "document_type": "family_calendar",
+                        "document_title": "Family Schedule",
+                        "chunk_id": "family_001::chunk_001",
+                        "source_path": "data/sample/family/family_schedule.md",
+                    },
+                ),
+                0.9,
+            ),
+        ]
+
+        response = answer_question(
+            pipeline,
+            "Plan my week",
+            reference_date="2026-08-20",
+        )
+
+        self.assertEqual(pipeline.questions, [response.question])
+        self.assertEqual(pipeline.generation_results, [])
+        self.assertEqual(response.answer.count("swim practice"), 1)
+        self.assertIn("4:30–5:00 PM", response.answer)
+        self.assertIn("9:00–10:15 AM", response.answer)
+        self.assertIn("1:00–2:30 PM", response.answer)
+        self.assertIn("your elementary-school child", response.answer)
+        self.assertIn("your middle-school child", response.answer)
+        self.assertNotIn("Monday, August 24", response.answer)
+        self.assertNotIn("invented school event", response.answer)
+
+    def test_weekly_plan_without_calendar_items_does_not_generate(self) -> None:
+        pipeline = FakePipeline("Invented weekly plan. [S1]")
+
+        response = answer_question(
+            pipeline,
+            "Help me organize the week",
+            reference_date="2026-08-20",
+        )
+
+        self.assertEqual(pipeline.questions, [response.question])
+        self.assertEqual(pipeline.generation_results, [])
+        self.assertEqual(response.answer, WEEKLY_AGENDA_EMPTY_TEXT)
+        self.assertEqual(response.sources, ())
+
+    def test_sunday_meal_plan_uses_exact_table_row_without_generation(
+        self,
+    ) -> None:
+        pipeline = FakePipeline(
+            "Sunday, Aug 23 | Sheet-pan chicken | Prepare during robotics [S1]"
+        )
+        pipeline.results = [
+            (
+                Document(
+                    page_content="""# Family Meal Plan
+
+| Day | Dinner | Preparation note |
+|---|---|---|
+| Saturday, Aug 22 | Sheet-pan chicken | Prep vegetables during robotics class |
+| Sunday, Aug 23 | Neighborhood potluck | Family is bringing lemon bars |""",
+                    metadata={
+                        "document_id": "household_001",
+                        "document_type": "meal_plan",
+                        "document_title": "Family Meal Plan",
+                        "chunk_id": "household_001::chunk_000",
+                        "source_path": "data/sample/household/meal_plan.md",
+                    },
+                ),
+                0.97,
+            ),
+        ]
+
+        response = answer_question(
+            pipeline,
+            "What is the meal plan for Sunday?",
+            reference_date="2026-08-23",
+        )
+
+        self.assertEqual(pipeline.questions, [response.question])
+        self.assertEqual(pipeline.generation_results, [])
+        self.assertIn("Sunday, August 23", response.answer)
+        self.assertIn("Neighborhood potluck", response.answer)
+        self.assertIn("Family is bringing lemon bars", response.answer)
+        self.assertNotIn("Sheet-pan chicken", response.answer)
+        self.assertNotIn("robotics", response.answer)
+        self.assertEqual(len(response.sources), 1)
+
+    def test_dated_meal_plan_builder_returns_none_without_requested_row(
+        self,
+    ) -> None:
+        results = [
+            (
+                Document(
+                    page_content=(
+                        "| Saturday, Aug 22 | Sheet-pan chicken | Prep vegetables |"
+                    ),
+                    metadata={
+                        "document_type": "meal_plan",
+                        "source_path": "data/sample/household/meal_plan.md",
+                    },
+                ),
+                0.9,
+            )
+        ]
+
+        answer = build_dated_meal_plan_answer(
+            results,
+            "What is the meal plan for Sunday?",
+            "2026-08-23",
+        )
+
+        self.assertIsNone(answer)
 
     def test_out_of_week_answer_items_are_removed(self) -> None:
         answer = (

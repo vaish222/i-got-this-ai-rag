@@ -50,10 +50,10 @@ CURRENT_APP_RESULTS_PATH = (
     / "results.json"
 )
 SUGGESTED_QUESTIONS = (
-    ("📅", "What's coming up this week?"),
+    ("⏭️", "What's coming up this week?"),
     ("💌", "Which invitations still need an RSVP?"),
     ("🎒", "What should I prepare for this weekend?"),
-    ("🎁", "Which birthdays still need gifts?"),
+    ("📅", "Plan my week."),
 )
 PENDING_PROMPT_KEY = "pending_prompt"
 ANSWER_CATEGORY_LABELS = {
@@ -80,6 +80,22 @@ ANSWER_CATEGORY_KEYWORDS = (
         ),
     ),
     (
+        "kids",
+        (
+            "piano",
+            "robotics",
+            "singing",
+            "taekwondo",
+            "watercolor",
+            "swim",
+            "music lesson",
+            "ensemble",
+            "workshop",
+            "kids activity",
+            "children's activity",
+        ),
+    ),
+    (
         "school",
         (
             "school",
@@ -89,19 +105,6 @@ ANSWER_CATEGORY_KEYWORDS = (
             "picture day",
             "diagnostic",
             "permission form",
-        ),
-    ),
-    (
-        "kids",
-        (
-            "robotics",
-            "watercolor",
-            "swim",
-            "music lesson",
-            "ensemble",
-            "workshop",
-            "kids activity",
-            "children's activity",
         ),
     ),
     (
@@ -122,6 +125,8 @@ ANSWER_CATEGORY_KEYWORDS = (
             "home task",
             "maintenance",
             "repair",
+            "hvac",
+            "technician arrival",
             "groceries",
             "meal plan",
             "laundry",
@@ -167,6 +172,13 @@ DATE_HEADING_PATTERN = re.compile(
     r"\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?:?",
     re.IGNORECASE,
 )
+AGENDA_TIME_PREFIX_PATTERN = re.compile(
+    r"^\s*[-*+]\s+(?P<time>"
+    r"(?:(?:\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\s*[–-]\s*)?"
+    r"\d{1,2}(?::\d{2})?\s*(?:AM|PM)|Noon|Afternoon|Evening)"
+    r")\s+—\s+(?P<body>.+)$",
+    re.IGNORECASE,
+)
 
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
@@ -210,6 +222,16 @@ def _answer_block_category(
     text: str,
     source_categories: dict[str, str],
 ) -> str | None:
+    cited_categories = {
+        source_categories[label.upper()]
+        for label in CITATION_LABEL_PATTERN.findall(text)
+        if label.upper() in source_categories
+    }
+    if len(cited_categories) == 1:
+        cited_category = next(iter(cited_categories))
+        if cited_category != "family":
+            return cited_category
+
     normalized = text.casefold()
     for category, keywords in ANSWER_CATEGORY_KEYWORDS:
         if any(keyword in normalized for keyword in keywords):
@@ -249,6 +271,68 @@ def _is_date_heading(text: str) -> bool:
     return "\n" not in visible and bool(DATE_HEADING_PATTERN.fullmatch(visible))
 
 
+def _date_heading_label(text: str) -> str:
+    visible = _display_answer_text(text).strip()
+    visible = re.sub(r"^#{1,6}\s+", "", visible)
+    return visible.strip("*_ ").removesuffix(":")
+
+
+def _agenda_item_parts(text: str) -> tuple[str | None, str | None, str]:
+    visible = _display_answer_text(text).strip()
+    match = AGENDA_TIME_PREFIX_PATTERN.match(visible)
+    if match:
+        time_label = match.group("time").strip()
+        body = match.group("body").strip()
+    else:
+        time_label = None
+        body = LIST_ITEM_PATTERN.sub("", visible, count=1).strip()
+
+    normalized = body.casefold()
+    if "rsvp" in normalized and ("deadline" in normalized or "due" in normalized):
+        status = "ACTION NEEDED"
+    elif "deadline" in normalized:
+        status = "DEADLINE"
+    elif re.search(r"\bdue\b", normalized):
+        status = "DUE"
+    else:
+        status = None
+    return time_label, status, body
+
+
+def _render_day_entry(
+    category: str | None,
+    text: str,
+    response_index: int,
+    day_index: int,
+    entry_index: int,
+) -> None:
+    time_label, status, body = _agenda_item_parts(text)
+    with st.container(
+        key=f"answer_event_row_{response_index}_{day_index}_{entry_index}",
+    ):
+        badges: list[str] = []
+        if category is not None:
+            category_label = html.escape(ANSWER_CATEGORY_LABELS[category])
+            badges.append(
+                f'<span class="igt-category-chip igt-chip-{category}">'
+                f"{category_label}</span>"
+            )
+        if status is not None:
+            badges.append(
+                f'<span class="igt-action-chip">{html.escape(status)}</span>'
+            )
+        if time_label is not None:
+            badges.append(
+                f'<span class="igt-time-chip">{html.escape(time_label)}</span>'
+            )
+        if badges:
+            st.markdown(
+                f'<div class="igt-event-meta">{"".join(badges)}</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(body)
+
+
 def categorized_answer_blocks(
     response: AnswerView,
 ) -> tuple[tuple[str | None, str], ...]:
@@ -259,9 +343,11 @@ def categorized_answer_blocks(
     }
     categorized: list[tuple[str | None, str]] = []
     active_category: str | None = None
+    within_dated_section = False
     for text in _split_answer_blocks(response.answer):
         explicit_category = _answer_block_category(text, source_categories)
         if _is_date_heading(text):
+            within_dated_section = True
             active_category = explicit_category
             category = None
         elif explicit_category is not None:
@@ -271,7 +357,12 @@ def categorized_answer_blocks(
             category = active_category
         else:
             category = None
-        if categorized and category is not None and categorized[-1][0] == category:
+        if (
+            categorized
+            and not within_dated_section
+            and category is not None
+            and categorized[-1][0] == category
+        ):
             previous_category, previous_text = categorized[-1]
             categorized[-1] = (previous_category, f"{previous_text}\n{text}")
         else:
@@ -281,8 +372,56 @@ def categorized_answer_blocks(
 
 def render_answer_content(response: AnswerView, response_index: int) -> None:
     blocks = categorized_answer_blocks(response)
-    if not any(category for category, _ in blocks):
+    has_date_headings = any(_is_date_heading(text) for _, text in blocks)
+    if not has_date_headings and not any(category for category, _ in blocks):
         st.markdown(_display_answer_text(response.answer))
+        return
+
+    if has_date_headings:
+        block_index = 0
+        day_index = 0
+        while block_index < len(blocks):
+            category, text = blocks[block_index]
+            visible_text = _display_answer_text(text)
+            if not visible_text:
+                block_index += 1
+                continue
+            if not _is_date_heading(visible_text):
+                st.markdown(visible_text)
+                block_index += 1
+                continue
+
+            day_entries: list[tuple[str | None, str]] = []
+            next_index = block_index + 1
+            while next_index < len(blocks):
+                next_category, next_text = blocks[next_index]
+                if _is_date_heading(next_text):
+                    break
+                if (
+                    day_entries
+                    and next_category is None
+                    and not LIST_ITEM_PATTERN.match(next_text)
+                ):
+                    break
+                day_entries.append((next_category, next_text))
+                next_index += 1
+
+            with st.container(
+                key=f"answer_daily_card_{response_index}_{day_index}",
+            ):
+                st.markdown(f"### {_date_heading_label(visible_text)}")
+                for entry_index, (entry_category, entry_text) in enumerate(
+                    day_entries
+                ):
+                    _render_day_entry(
+                        entry_category,
+                        entry_text,
+                        response_index,
+                        day_index,
+                        entry_index,
+                    )
+            day_index += 1
+            block_index = next_index
         return
 
     for block_index, (category, text) in enumerate(blocks):
@@ -507,7 +646,7 @@ def render_question_answer() -> None:
                 "gifts, and family commitments. What would you like to figure out?"
             )
 
-    st.markdown("##### Try asking")
+    st.markdown("##### WHAT DO YOU NEED RIGHT NOW?")
     suggestion_columns = st.columns(2)
     for index, (icon, question) in enumerate(SUGGESTED_QUESTIONS):
         with suggestion_columns[index % 2]:
@@ -667,6 +806,9 @@ def render_app() -> None:
         }
         [data-testid="stChatMessage"]:has(
             [class*="st-key-answer_category_"]
+        ),
+        [data-testid="stChatMessage"]:has(
+            [class*="st-key-answer_daily_card_"]
         ) {
             backdrop-filter: none;
             background: transparent;
@@ -704,6 +846,67 @@ def render_app() -> None:
         }
         [class*="st-key-answer_category_family_"] {
             background: var(--igt-family);
+        }
+        [class*="st-key-answer_daily_card_"] {
+            background: rgba(252, 251, 250, .78);
+            border: 1px solid rgba(28, 32, 66, .14);
+            border-left: 6px solid var(--igt-orange);
+            border-radius: 18px;
+            box-shadow: 0 7px 20px rgba(28, 32, 66, .08);
+            margin: .75rem 0;
+            padding: .75rem 1rem .35rem;
+        }
+        [class*="st-key-answer_daily_card_"] h3 {
+            color: var(--igt-navy);
+            font-size: 1.18rem;
+            font-weight: 850;
+            letter-spacing: .01em;
+            margin: 0 0 .3rem;
+        }
+        [class*="st-key-answer_event_row_"] {
+            border-bottom: 1px solid rgba(28, 32, 66, .1);
+            padding: .48rem 0 .38rem;
+        }
+        [class*="st-key-answer_event_row_"]:last-child {
+            border-bottom: 0;
+        }
+        [class*="st-key-answer_event_row_"]
+        [data-testid="stMarkdownContainer"] p {
+            margin: .18rem 0;
+        }
+        .igt-event-meta {
+            align-items: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: .35rem;
+            margin-bottom: .18rem;
+        }
+        .igt-category-chip,
+        .igt-action-chip,
+        .igt-time-chip {
+            border: 1px solid rgba(28, 32, 66, .12);
+            border-radius: 999px;
+            color: var(--igt-navy);
+            display: inline-block;
+            font-size: .76rem;
+            font-weight: 800;
+            line-height: 1;
+            padding: .34rem .55rem;
+        }
+        .igt-chip-school { background: var(--igt-school); }
+        .igt-chip-kids { background: var(--igt-kids); }
+        .igt-chip-household { background: var(--igt-household); }
+        .igt-chip-learning { background: var(--igt-learning); }
+        .igt-chip-volunteer { background: var(--igt-volunteer); }
+        .igt-chip-social { background: var(--igt-social); }
+        .igt-chip-family { background: var(--igt-family); }
+        .igt-action-chip {
+            background: rgba(255, 118, 24, .16);
+            border-color: rgba(255, 118, 24, .4);
+            color: #8a3500;
+        }
+        .igt-time-chip {
+            background: rgba(203, 219, 242, .7);
         }
         [data-testid="stChatInput"] {
             background: #ffffff;

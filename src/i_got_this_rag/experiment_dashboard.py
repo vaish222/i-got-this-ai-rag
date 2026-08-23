@@ -311,7 +311,10 @@ def load_current_app_benchmark(path: Path) -> CurrentAppBenchmark:
     payload = json.loads(path.resolve().read_text(encoding="utf-8"))
     if payload.get("phase") != 10:
         raise ValueError("The current-app benchmark requires a Phase 10 artifact.")
-    if payload.get("evaluation_version") != "phase10-current-app-v1":
+    if payload.get("evaluation_version") not in {
+        "phase10-current-app-v1",
+        "phase10-current-app-v2",
+    }:
         raise ValueError("Unsupported current-app evaluation version.")
     metrics = payload.get("metrics")
     regressions = payload.get("ui_regressions")

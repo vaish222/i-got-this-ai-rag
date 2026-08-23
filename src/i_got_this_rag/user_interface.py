@@ -21,6 +21,10 @@ CLARIFICATION_TEXT = (
     "Can you be more specific about what you’re looking for? For example, are you "
     "asking about your schedule, deadlines, invitations, gifts, or volunteer work?"
 )
+WEEKLY_AGENDA_EMPTY_TEXT = (
+    "I couldn’t find any dated schedule items for this week."
+)
+MEAL_PLAN_EMPTY_TEXT = "I couldn’t find a meal plan for that day."
 UNDERSPECIFIED_QUESTION_PATTERN = re.compile(
     r"^(?:what(?:'|’)s next|what is next|what else|what should i know)\s*[?!.]*$",
     re.IGNORECASE,
@@ -91,9 +95,17 @@ VOLUNTEER_QUESTION_PATTERN = re.compile(
     r"\b(?:volunteer(?:ing)?|mentor(?:ing)?)\b",
     re.IGNORECASE,
 )
-THIS_WEEK_PATTERN = re.compile(r"\bthis week\b", re.IGNORECASE)
+MEAL_PLAN_QUESTION_PATTERN = re.compile(
+    r"\b(?:meal\s+plan|dinner|what\s+(?:are\s+we|should\s+we)\s+eat)\b",
+    re.IGNORECASE,
+)
+THIS_WEEK_PATTERN = re.compile(
+    r"\b(?:(?:this|my|our|the)\s+week|week\s+ahead|weekly)\b",
+    re.IGNORECASE,
+)
 WEEKLY_AGENDA_QUESTION_PATTERN = re.compile(
-    r"\b(?:coming up|what(?:'|’)s next|scheduled|schedule|happening)\b",
+    r"\b(?:coming up|what(?:'|’)s next|scheduled|schedule|happening|"
+    r"plan(?:ning)?|organi[sz](?:e|ing)|look(?:s)? like|show)\b",
     re.IGNORECASE,
 )
 SCHEDULE_DAY_HEADING_PATTERN = re.compile(
@@ -105,6 +117,11 @@ SCHEDULE_DAY_HEADING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SCHEDULE_BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(?P<item>.+?)\s*$")
+MEAL_PLAN_ROW_PATTERN = re.compile(
+    r"^\|\s*(?P<day>[^|]+?)\s*\|\s*(?P<dinner>[^|]+?)\s*\|"
+    r"\s*(?P<note>[^|]+?)\s*\|\s*$",
+    re.IGNORECASE,
+)
 SCHEDULE_LEADING_IDENTIFIER_PATTERN = re.compile(
     r"^(?P<prefix>.+?—\s+)"
     r"(?P<identifier>"
@@ -208,6 +225,14 @@ class WeeklyAgendaItem:
     description: str
     source_label: str
     source_order: int
+
+
+@dataclass(frozen=True)
+class MealPlanItem:
+    scheduled_date: date
+    dinner: str
+    preparation_note: str
+    source_label: str
 
 
 def _reference_date(value: str | date | None) -> date | None:
@@ -333,6 +358,102 @@ def is_weekly_agenda_question(question: str) -> bool:
         THIS_WEEK_PATTERN.search(question)
         and WEEKLY_AGENDA_QUESTION_PATTERN.search(question)
         and not VOLUNTEER_QUESTION_PATTERN.search(question)
+    )
+
+
+def _requested_meal_date(
+    question: str,
+    reference_date: str | date | None,
+) -> date | None:
+    reference = _reference_date(reference_date)
+    if reference is None or not MEAL_PLAN_QUESTION_PATTERN.search(question):
+        return None
+
+    explicit_dates = _explicit_dates(question, reference)
+    if explicit_dates:
+        return explicit_dates[0]
+
+    weekday_match = WEEKDAY_PATTERN.search(question)
+    if weekday_match is None:
+        return None
+    weekday_number = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }[weekday_match.group(0).casefold()]
+    days_ahead = (weekday_number - reference.weekday()) % 7
+    return reference + timedelta(days=days_ahead)
+
+
+def is_dated_meal_plan_question(
+    question: str,
+    reference_date: str | date | None,
+) -> bool:
+    return _requested_meal_date(question, reference_date) is not None
+
+
+def _is_meal_plan_document(document: Document) -> bool:
+    document_type = str(document.metadata.get("document_type", "")).casefold()
+    document_id = str(document.metadata.get("document_id", "")).casefold()
+    source_path = str(document.metadata.get("source_path", "")).casefold()
+    return (
+        document_type == "meal_plan"
+        or document_id == "household_001"
+        or source_path.endswith("/household/meal_plan.md")
+    )
+
+
+def _meal_plan_item(
+    results: list[tuple[Document, float]],
+    requested_date: date,
+) -> MealPlanItem | None:
+    for rank, (document, _) in enumerate(results, start=1):
+        if not _is_meal_plan_document(document):
+            continue
+        for raw_line in document.page_content.splitlines():
+            row = MEAL_PLAN_ROW_PATTERN.match(raw_line.strip())
+            if row is None:
+                continue
+            parsed_dates = _explicit_dates(row.group("day"), requested_date)
+            if not parsed_dates or parsed_dates[0] != requested_date:
+                continue
+            dinner = _clean_markdown_value(row.group("dinner"))
+            note = _clean_markdown_value(row.group("note"))
+            if not dinner or not note:
+                continue
+            return MealPlanItem(
+                scheduled_date=requested_date,
+                dinner=dinner,
+                preparation_note=note,
+                source_label=f"S{rank}",
+            )
+    return None
+
+
+def build_dated_meal_plan_answer(
+    results: list[tuple[Document, float]],
+    question: str,
+    reference_date: str | date | None,
+) -> str | None:
+    requested_date = _requested_meal_date(question, reference_date)
+    if requested_date is None:
+        return None
+    item = _meal_plan_item(results, requested_date)
+    if item is None:
+        return None
+    day_label = (
+        f"{item.scheduled_date.strftime('%A, %B')} "
+        f"{item.scheduled_date.day}"
+    )
+    return (
+        "Here’s the meal plan:\n\n"
+        f"**{day_label}**\n"
+        f"- **Dinner:** {item.dinner} [{item.source_label}]\n"
+        f"- **Preparation:** {item.preparation_note} [{item.source_label}]"
     )
 
 
@@ -763,6 +884,17 @@ def answer_question(
     )
     if is_pending_rsvp_question(rewrite.retrieval_question):
         generated_answer = build_pending_rsvp_answer(results)
+    elif is_dated_meal_plan_question(
+        rewrite.retrieval_question,
+        reference_date,
+    ):
+        generated_answer = build_dated_meal_plan_answer(
+            results,
+            rewrite.retrieval_question,
+            reference_date,
+        )
+        if generated_answer is None:
+            generated_answer = MEAL_PLAN_EMPTY_TEXT
     elif is_volunteer_week_question(rewrite.retrieval_question):
         generated_answer = build_volunteer_week_answer(
             normalized,
@@ -773,7 +905,7 @@ def answer_question(
     elif is_weekly_agenda_question(rewrite.retrieval_question):
         generated_answer = build_weekly_agenda_answer(results, reference_date)
         if generated_answer is None:
-            generated_answer = pipeline.generate(rewrite.retrieval_question, results)
+            generated_answer = WEEKLY_AGENDA_EMPTY_TEXT
     else:
         generated_answer = pipeline.generate(rewrite.retrieval_question, results)
     answer = CitationAttributor().attribute(generated_answer, results)
@@ -789,7 +921,14 @@ def answer_question(
         for citation in extract_citations(answer, retrieved_chunks)
         if citation.get("resolved")
     ]
-    if not answer or (answer.strip() != REFUSAL_TEXT and not resolved_citations):
+    uncited_safe_answers = {
+        REFUSAL_TEXT,
+        WEEKLY_AGENDA_EMPTY_TEXT,
+        MEAL_PLAN_EMPTY_TEXT,
+    }
+    if not answer or (
+        answer.strip() not in uncited_safe_answers and not resolved_citations
+    ):
         answer = REFUSAL_TEXT
     answer = format_answer_for_display(answer)
     chunks_by_rank = {int(chunk["rank"]): chunk for chunk in retrieved_chunks}
