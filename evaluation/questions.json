@@ -79,7 +79,7 @@
     {
       "question_id": "Q009",
       "question": "Which invitations still need an RSVP?",
-      "expected_answer": "The neighborhood potluck still needs an RSVP by Friday, August 21 at noon, and the August 29 dinner with friend_family_02 needs a reply by Monday, August 24 after confirming whether children are included. The August 22 birthday-party RSVP is complete.",
+      "expected_answer": "The neighborhood potluck needs an RSVP by August 21 at noon, and the August 29 dinner with friend_family_02 needs a reply by August 24 after confirming whether children are included. Future pending responses are friend_04's 40th birthday by September 5, the Ganpati pooja by September 10, friend_child_02's first birthday at the gurdwara by September 20, and the Diwali celebration by October 24. The August 22 birthday-party RSVP is complete.",
       "expected_source_ids": ["social_001"],
       "expected_sources": ["August Invitations and RSVP Tracker"],
       "category": "date_deadline",
@@ -97,7 +97,7 @@
     {
       "question_id": "Q011",
       "question": "Which birthdays or social events do I need to prepare for?",
-      "expected_answer": "Buy and wrap the astronomy kit for friend_child_01's August 22 birthday party; RSVP to the August 23 neighborhood potluck by August 21 at noon and prepare the lemon bars, serving spatula, and ingredient card; ask whether children are included and reply to the August 29 dinner by August 24; and mail relative_01's purchased gift and birthday card by August 24 for the August 31 birthday.",
+      "expected_answer": "Buy and wrap the astronomy kit for friend_child_01's August 22 birthday party; RSVP to the August 23 neighborhood potluck and prepare the lemon bars; reply to the August 29 dinner; and mail relative_01's birthday gift and card. Future preparation includes contributing to friend_04's 40th-birthday group gift and choosing semi-formal outfits; taking flowers or fruit and preparing Indian festive clothes for the Ganpati pooja; buying a board book, making an education-fund contribution, and preparing modest clothes and head coverings for friend_child_02's first birthday at the gurdwara; and buying a host gift and nut-free sweets and checking festive outfits for the Diwali celebration.",
       "expected_source_ids": ["social_001", "social_002", "social_003"],
       "expected_sources": ["August Invitations and RSVP Tracker", "Birthdays and Gifts Tracker — August and September", "Social Commitments and Follow-ups"],
       "category": "cross_document",
