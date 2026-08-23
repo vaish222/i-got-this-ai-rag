@@ -3,11 +3,11 @@ document_id: activities_001
 document_title: August Swim Team Schedule
 domain: activities
 document_type: activity_schedule
-person: child_01
+person: [child_01, child_02]
 related_person: adult_02
 source: synthetic_public_corpus
-tags: [swimming, saturday, equipment]
-updated_at: 2026-08-16
+tags: [swimming, weekday, saturday, recurring, equipment]
+updated_at: 2026-08-23
 ---
 
 # August Swim Team Schedule
@@ -25,3 +25,10 @@ Bring a swimsuit, goggles, swim cap, labeled water bottle, and towel. The coach 
 - Saturday, August 29: time trial, 8:30–11:00 AM; volunteer timers arrive at 8:00 AM.
 
 If a swimmer will miss the time trial, the coach needs notice by August 26.
+
+## Recurring fall schedule
+
+- Beginning **Monday, August 31**, `child_01` has middle-school swim practice every **Monday through Friday from 6:00–7:00 PM** at Northside Aquatic Center. Weekday practices use Lane Group B, and swimmers should arrive ten minutes early.
+- Beginning **Saturday, August 29**, `child_02` has an elementary swim lesson every **Saturday from 10:30–11:15 AM** in the teaching pool. Bring a swimsuit, goggles, a labeled towel, and a change of clothes.
+
+There is no elementary swim lesson on Saturday, September 5 because the aquatic center is closed for maintenance.

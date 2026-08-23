@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -55,6 +56,107 @@ SUGGESTED_QUESTIONS = (
     ("🎁", "Which birthdays still need gifts?"),
 )
 PENDING_PROMPT_KEY = "pending_prompt"
+ANSWER_CATEGORY_LABELS = {
+    "school": "🏫 School",
+    "kids": "👧 Kids activities",
+    "household": "🏠 Household",
+    "learning": "📚 Learning",
+    "volunteer": "🤝 Volunteer",
+    "social": "🎉 Social",
+    "family": "👨‍👩‍👧 Family",
+}
+ANSWER_CATEGORY_KEYWORDS = (
+    (
+        "volunteer",
+        (
+            "volunteer",
+            "mentor",
+            "mentoring",
+            "donate",
+            "donation",
+            "collection",
+            "welcome table",
+            "neighborhood association",
+        ),
+    ),
+    (
+        "school",
+        (
+            "school",
+            "teacher",
+            "classroom",
+            "field trip",
+            "picture day",
+            "diagnostic",
+            "permission form",
+        ),
+    ),
+    (
+        "kids",
+        (
+            "robotics",
+            "watercolor",
+            "swim",
+            "music lesson",
+            "ensemble",
+            "workshop",
+            "kids activity",
+            "children's activity",
+        ),
+    ),
+    (
+        "learning",
+        (
+            "practical ai",
+            "course",
+            "assignment",
+            "certificate",
+            "study",
+            "learning",
+        ),
+    ),
+    (
+        "household",
+        (
+            "household",
+            "home task",
+            "maintenance",
+            "repair",
+            "groceries",
+            "meal plan",
+            "laundry",
+            "trash",
+        ),
+    ),
+    (
+        "social",
+        (
+            "rsvp",
+            "invitation",
+            "potluck",
+            "dinner with",
+            "coffee with",
+            "birthday party",
+            "friend",
+            "social",
+        ),
+    ),
+    (
+        "family",
+        (
+            "family",
+            "birthday",
+            "gift",
+            "relative",
+        ),
+    ),
+)
+SOURCE_CATEGORY_PATTERN = re.compile(
+    r"(?:^|/)(school|activities|household|learning|volunteer|social|family)(?:/|$)",
+    re.IGNORECASE,
+)
+CITATION_LABEL_PATTERN = re.compile(r"\[(S\d+)\]", re.IGNORECASE)
+LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+] |\d+[.)] )")
 
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
@@ -84,6 +186,80 @@ def render_sources(response: AnswerView) -> None:
                 location = f"{location} · page {source.page_number}"
             st.markdown(f"**[{source.label}] {source.title}**")
             st.caption(location)
+
+
+def _source_category(source_path: str) -> str | None:
+    match = SOURCE_CATEGORY_PATTERN.search(source_path.replace("\\", "/"))
+    if not match:
+        return None
+    category = match.group(1).casefold()
+    return "kids" if category == "activities" else category
+
+
+def _answer_block_category(
+    text: str,
+    source_categories: dict[str, str],
+) -> str | None:
+    normalized = text.casefold()
+    for category, keywords in ANSWER_CATEGORY_KEYWORDS:
+        if any(keyword in normalized for keyword in keywords):
+            return category
+    for label in CITATION_LABEL_PATTERN.findall(text):
+        category = source_categories.get(label.upper())
+        if category:
+            return category
+    return None
+
+
+def _split_answer_blocks(answer: str) -> tuple[str, ...]:
+    blocks: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", answer.strip()):
+        current: list[str] = []
+        for line in paragraph.splitlines():
+            if LIST_ITEM_PATTERN.match(line) and current:
+                blocks.append("\n".join(current).strip())
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            blocks.append("\n".join(current).strip())
+    return tuple(block for block in blocks if block)
+
+
+def categorized_answer_blocks(
+    response: AnswerView,
+) -> tuple[tuple[str | None, str], ...]:
+    source_categories = {
+        source.label.upper(): category
+        for source in response.sources
+        if (category := _source_category(source.source_path)) is not None
+    }
+    categorized: list[tuple[str | None, str]] = []
+    for text in _split_answer_blocks(response.answer):
+        category = _answer_block_category(text, source_categories)
+        if categorized and category is not None and categorized[-1][0] == category:
+            previous_category, previous_text = categorized[-1]
+            categorized[-1] = (previous_category, f"{previous_text}\n{text}")
+        else:
+            categorized.append((category, text))
+    return tuple(categorized)
+
+
+def render_answer_content(response: AnswerView, response_index: int) -> None:
+    blocks = categorized_answer_blocks(response)
+    if not any(category for category, _ in blocks):
+        st.markdown(response.answer)
+        return
+
+    for block_index, (category, text) in enumerate(blocks):
+        if category is None:
+            st.markdown(text)
+            continue
+        with st.container(
+            key=f"answer_category_{category}_{response_index}_{block_index}",
+        ):
+            st.markdown(f"**{ANSWER_CATEGORY_LABELS[category]}**")
+            st.markdown(text)
 
 
 @st.cache_data(show_spinner=False)
@@ -261,9 +437,9 @@ def render_experiment_dashboard() -> None:
     st.caption(f"Current app measurement completed: {current.completed_at}")
 
 
-def render_chat_response(response: AnswerView) -> None:
+def render_chat_response(response: AnswerView, response_index: int) -> None:
     with st.chat_message("assistant", avatar="✨"):
-        st.markdown(response.answer)
+        render_answer_content(response, response_index)
         render_sources(response)
 
 
@@ -275,7 +451,7 @@ def render_question_answer() -> None:
     conversation = st.session_state.setdefault("conversation", [])
     toolbar_left, toolbar_right = st.columns([3, 1])
     with toolbar_left:
-        st.markdown("#### Ask what’s next, what needs attention, or what you might be forgetting.")
+        st.markdown("#### Hi, Vaishali! 👋 Here’s your life, a little more organized")
         st.caption("🔒 Private by design · Answers grounded in your information")
     with toolbar_right:
         if st.button(
@@ -306,12 +482,12 @@ def render_question_answer() -> None:
                 args=(question,),
             )
 
-    for response in conversation:
+    for response_index, response in enumerate(conversation):
         if not isinstance(response, AnswerView):
             continue
         with st.chat_message("user", avatar="😊"):
             st.markdown(response.question)
-        render_chat_response(response)
+        render_chat_response(response, response_index)
 
     typed_prompt = st.chat_input(
         "Ask what's next, what to prepare, or what you might be forgetting…"
@@ -347,7 +523,7 @@ def render_question_answer() -> None:
                     history=history,
                     rewriter=rewriter,
                 )
-            st.markdown(response.answer)
+            render_answer_content(response, len(conversation))
             render_sources(response)
         conversation.append(response)
         st.rerun()
@@ -374,6 +550,13 @@ def render_app() -> None:
             --igt-blue-strong: #badbe5;
             --igt-red: #dc3f40;
             --igt-orange: #ff7618;
+            --igt-school: #dceeff;
+            --igt-kids: #ebe3ff;
+            --igt-household: #ffe2d2;
+            --igt-learning: #d5f2ec;
+            --igt-volunteer: #dff2d8;
+            --igt-social: #ffdde2;
+            --igt-family: #ffe8c9;
             --igt-paper: #fcfbfa;
         }
         ::selection {
@@ -444,6 +627,46 @@ def render_app() -> None:
             box-shadow: 0 7px 22px rgba(28, 32, 66, .08);
             margin-bottom: .8rem;
             padding: .35rem .5rem;
+        }
+        [data-testid="stChatMessage"]:has(
+            [class*="st-key-answer_category_"]
+        ) {
+            backdrop-filter: none;
+            background: transparent;
+            border-color: transparent;
+            box-shadow: none;
+        }
+        [class*="st-key-answer_category_"] {
+            border: 1px solid rgba(28, 32, 66, .12);
+            border-radius: 18px;
+            box-shadow: 0 6px 18px rgba(28, 32, 66, .07);
+            margin: .45rem 0;
+            padding: .8rem 1rem .55rem;
+        }
+        [class*="st-key-answer_category_"]
+        [data-testid="stMarkdownContainer"] p {
+            color: var(--igt-navy);
+        }
+        [class*="st-key-answer_category_school_"] {
+            background: var(--igt-school);
+        }
+        [class*="st-key-answer_category_kids_"] {
+            background: var(--igt-kids);
+        }
+        [class*="st-key-answer_category_household_"] {
+            background: var(--igt-household);
+        }
+        [class*="st-key-answer_category_learning_"] {
+            background: var(--igt-learning);
+        }
+        [class*="st-key-answer_category_volunteer_"] {
+            background: var(--igt-volunteer);
+        }
+        [class*="st-key-answer_category_social_"] {
+            background: var(--igt-social);
+        }
+        [class*="st-key-answer_category_family_"] {
+            background: var(--igt-family);
         }
         [data-testid="stChatInput"] {
             background: #ffffff;
@@ -521,10 +744,8 @@ def render_app() -> None:
         f"""
         <div class="igt-hero">
             <h1>✨ I GOT THIS.</h1>
-            <h3>24 hours. A hundred things to remember.</h3>
-            <h3>Let’s make “What’s next?” the easy part.</h3>
+            <h4>24 hours. A hundred things to remember. Let’s make “What’s next?” the easy part.</h4>
             <p>School. Kids. Home. Learning. Volunteering. Social plans. One place to remember what matters, what’s coming, and what still needs your attention.</p>
-            <h2>Hi, {name}! 👋 Here’s your life, a little more organized</h2>
         </div>
         """,
         unsafe_allow_html=True,

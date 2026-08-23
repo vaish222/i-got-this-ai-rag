@@ -28,6 +28,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
 from i_got_this_rag.user_interface import (  # noqa: E402
     CLARIFICATION_TEXT,
     AnswerView,
+    SourceView,
     answer_question,
     build_weekly_agenda_answer,
     build_volunteer_week_answer,
@@ -427,6 +428,13 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             "#badbe5",
             "#dc3f40",
             "#ff7618",
+            "#dceeff",
+            "#ebe3ff",
+            "#ffe2d2",
+            "#d5f2ec",
+            "#dff2d8",
+            "#ffdde2",
+            "#ffe8c9",
             "#fcfbfa",
         ):
             self.assertIn(color, style)
@@ -450,12 +458,19 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertIn("background: var(--igt-red)", style)
         self.assertIn("color: var(--igt-orange) !important", style)
         self.assertIn("background-color: var(--igt-orange) !important", style)
+        self.assertIn('[class*="st-key-answer_category_school_"]', style)
+        self.assertIn('[class*="st-key-answer_category_kids_"]', style)
+        self.assertIn('[class*="st-key-answer_category_household_"]', style)
+        self.assertIn('[class*="st-key-answer_category_learning_"]', style)
+        self.assertIn('[class*="st-key-answer_category_volunteer_"]', style)
+        self.assertIn('[class*="st-key-answer_category_social_"]', style)
+        self.assertIn('[class*="st-key-answer_category_family_"]', style)
         self.assertIn('[data-baseweb="tab"] *', style)
         self.assertIn('[data-testid="stchatinput"] textarea', style)
         self.assertTrue(
             any(
-                "<h1>✨ I GOT THIS. What’s next?</h1>" in item.value
-                and "<h2>Hi," in item.value
+                "<h1>✨ I GOT THIS.</h1>" in item.value
+                and "<h3>Hi," in item.value
                 for item in app.markdown
             )
         )
@@ -510,10 +525,66 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             app.chat_message[0].markdown[0].value,
             previous_response.question,
         )
-        self.assertEqual(
-            app.chat_message[1].markdown[0].value,
-            previous_response.answer,
+        rendered_answer = [item.value for item in app.chat_message[1].markdown]
+        self.assertIn("**🎉 Social**", rendered_answer)
+        self.assertIn(previous_response.answer, rendered_answer)
+
+    def test_answer_items_render_as_pastel_category_cards(self) -> None:
+        response = AnswerView(
+            question="What is coming up?",
+            retrieval_question="What is coming up?",
+            answer=(
+                "Here is what needs attention:\n\n"
+                "- The school field trip form is due Friday [S1].\n"
+                "- The robotics workshop starts Saturday [S2].\n"
+                "- Schedule the home repair [S3].\n"
+                "- Submit the course assignment [S4].\n"
+                "- Prepare for the mentor session [S5].\n"
+                "- Send the dinner RSVP [S6].\n"
+                "- Buy the family birthday gift [S7]."
+            ),
+            sources=tuple(
+                SourceView(
+                    label=f"S{index}",
+                    title=category.title(),
+                    source_path=f"data/sample/{category}/example.md",
+                    page_number=None,
+                )
+                for index, category in enumerate(
+                    (
+                        "school",
+                        "activities",
+                        "household",
+                        "learning",
+                        "volunteer",
+                        "social",
+                        "family",
+                    ),
+                    start=1,
+                )
+            ),
+            used_conversation_context=False,
         )
+        app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
+        app.session_state["conversation"] = [response]
+
+        app.run(timeout=20)
+
+        self.assertEqual(app.exception, [])
+        rendered = [item.value for item in app.chat_message[1].markdown]
+        for label in (
+            "**🏫 School**",
+            "**👧 Kids activities**",
+            "**🏠 Household**",
+            "**📚 Learning**",
+            "**🤝 Volunteer**",
+            "**🎉 Social**",
+            "**👨‍👩‍👧 Family**",
+        ):
+            self.assertIn(label, rendered)
+        self.assertIn("Here is what needs attention:", rendered)
+        self.assertIn("- The school field trip form is due Friday [S1].", rendered)
+        self.assertIn("- Buy the family birthday gift [S7].", rendered)
 
     def test_clarification_response_does_not_show_missing_source_notice(self) -> None:
         clarification = AnswerView(
