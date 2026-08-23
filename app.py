@@ -275,8 +275,8 @@ def render_question_answer() -> None:
     conversation = st.session_state.setdefault("conversation", [])
     toolbar_left, toolbar_right = st.columns([3, 1])
     with toolbar_left:
-        st.markdown("#### Your family knowledge assistant")
-        st.caption("Private session memory · grounded answers · safe citations")
+        st.markdown("#### Ask what’s next, what needs attention, or what you might be forgetting.")
+        st.caption("🔒 Private by design · Answers grounded in your information")
     with toolbar_right:
         if st.button(
             "↻ New conversation",
@@ -496,11 +496,21 @@ def render_app() -> None:
             padding-right: 1.2rem;
         }
         [data-baseweb="tab"] * { color: inherit !important; }
+        .stTabs [data-testid="stTab"][data-selected],
         [aria-selected="true"][data-baseweb="tab"] {
-            background: var(--igt-orange);
-            color: var(--igt-navy) !important;
+            background: transparent !important;
+            color: var(--igt-orange) !important;
+            -webkit-text-fill-color: var(--igt-orange) !important;
         }
-        [data-baseweb="tab-highlight"] { background: var(--igt-orange) !important; }
+        .stTabs [data-testid="stTab"][data-selected] *,
+        [aria-selected="true"][data-baseweb="tab"] * {
+            color: var(--igt-orange) !important;
+            -webkit-text-fill-color: var(--igt-orange) !important;
+        }
+        .stTabs .react-aria-SelectionIndicator,
+        [data-baseweb="tab-highlight"] {
+            background-color: var(--igt-orange) !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -510,9 +520,11 @@ def render_app() -> None:
     st.markdown(
         f"""
         <div class="igt-hero">
-            <h1>✨ I GOT THIS. What’s next?</h1>
-            <h2>Hi, {name}!</h2>
-            <p>Your command center for family plans, promises, and everything in between. It helps turn that daily mental clutter into one clear view of what matters now, what’s coming next, and what still needs attention.</p>
+            <h1>✨ I GOT THIS.</h1>
+            <h3>24 hours. A hundred things to remember.</h3>
+            <h3>Let’s make “What’s next?” the easy part.</h3>
+            <p>School. Kids. Home. Learning. Volunteering. Social plans. One place to remember what matters, what’s coming, and what still needs your attention.</p>
+            <h2>Hi, {name}! 👋 Here’s your life, a little more organized</h2>
         </div>
         """,
         unsafe_allow_html=True,

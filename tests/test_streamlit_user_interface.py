@@ -445,11 +445,11 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             '[aria-selected="true"][data-baseweb="tab"]',
             style,
         )
+        self.assertIn('[data-testid="sttab"][data-selected]', style)
+        self.assertIn(".react-aria-selectionindicator", style)
         self.assertIn("background: var(--igt-red)", style)
-        self.assertGreaterEqual(
-            style.count("background: var(--igt-orange)"),
-            2,
-        )
+        self.assertIn("color: var(--igt-orange) !important", style)
+        self.assertIn("background-color: var(--igt-orange) !important", style)
         self.assertIn('[data-baseweb="tab"] *', style)
         self.assertIn('[data-testid="stchatinput"] textarea', style)
         self.assertTrue(
