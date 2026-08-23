@@ -278,7 +278,11 @@ def render_question_answer() -> None:
         st.markdown("#### Your family knowledge assistant")
         st.caption("Private session memory · grounded answers · safe citations")
     with toolbar_right:
-        if st.button("↻ New conversation", width="stretch"):
+        if st.button(
+            "↻ New conversation",
+            key="new_conversation",
+            width="stretch",
+        ):
             st.session_state["conversation"] = []
             st.session_state.pop(PENDING_PROMPT_KEY, None)
             st.rerun()
@@ -364,25 +368,32 @@ def render_app() -> None:
             --igt-navy: #1c2042;
             --igt-yellow: #ffed8e;
             --igt-hero-yellow: #ffea8a;
+            --igt-hero-blue: #35aec0;
             --igt-blush: #efd6db;
             --igt-blue: #cbdbf2;
             --igt-blue-strong: #badbe5;
+            --igt-red: #dc3f40;
+            --igt-orange: #ff7618;
             --igt-paper: #fcfbfa;
         }
         ::selection {
-            background: var(--igt-yellow);
+            background: var(--igt-blue-strong);
             color: var(--igt-navy);
         }
         ::-moz-selection {
-            background: var(--igt-yellow);
+            background: var(--igt-blue-strong);
             color: var(--igt-navy);
         }
         .stApp {
-            background:
-                radial-gradient(circle at 8% 8%, rgba(239, 214, 219, .72), transparent 24rem),
-                radial-gradient(circle at 92% 4%, rgba(203, 219, 242, .72), transparent 28rem),
-                linear-gradient(180deg, var(--igt-paper) 0%, #ffffff 100%);
+            background: linear-gradient(
+                120deg,
+                var(--igt-hero-yellow) 0%,
+                var(--igt-yellow) 62%,
+                var(--igt-blush) 100%
+            );
+            background-attachment: fixed;
             color: var(--igt-navy);
+            min-height: 100vh;
         }
         .stApp [data-testid="stMarkdownContainer"],
         .stApp [data-testid="stCaptionContainer"],
@@ -397,12 +408,7 @@ def render_app() -> None:
         [data-testid="stHeader"] { background: transparent; }
         .block-container { max-width: 1180px; padding-top: 2rem; }
         .igt-hero {
-            background: linear-gradient(
-                120deg,
-                var(--igt-hero-yellow) 0%,
-                var(--igt-yellow) 62%,
-                var(--igt-blush) 100%
-            );
+            background: var(--igt-hero-blue);
             border-radius: 28px;
             box-shadow: 0 18px 45px rgba(28, 32, 66, .16);
             color: var(--igt-navy);
@@ -470,6 +476,16 @@ def render_app() -> None:
             box-shadow: 0 7px 18px rgba(28, 32, 66, .14);
             transform: translateY(-1px);
         }
+        [class*="st-key-suggestion_"] .stButton > button:hover,
+        [class*="st-key-suggestion_"] .stButton > button:focus,
+        [class*="st-key-suggestion_"] .stButton > button:active,
+        [class*="st-key-new_conversation"] .stButton > button:hover,
+        [class*="st-key-new_conversation"] .stButton > button:focus,
+        [class*="st-key-new_conversation"] .stButton > button:active {
+            background: var(--igt-red);
+            border-color: var(--igt-navy);
+            color: var(--igt-navy);
+        }
         .stButton > button * { color: inherit !important; }
         [data-baseweb="tab-list"] { gap: .5rem; }
         [data-baseweb="tab"] {
@@ -481,10 +497,10 @@ def render_app() -> None:
         }
         [data-baseweb="tab"] * { color: inherit !important; }
         [aria-selected="true"][data-baseweb="tab"] {
-            background: var(--igt-yellow);
+            background: var(--igt-orange);
             color: var(--igt-navy) !important;
         }
-        [data-baseweb="tab-highlight"] { background: var(--igt-navy) !important; }
+        [data-baseweb="tab-highlight"] { background: var(--igt-orange) !important; }
         </style>
         """,
         unsafe_allow_html=True,

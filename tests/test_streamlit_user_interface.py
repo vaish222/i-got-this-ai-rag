@@ -408,7 +408,7 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
 
         self.assertEqual(theme["base"], "light")
         self.assertEqual(theme["primaryColor"], "#1C2042")
-        self.assertEqual(theme["backgroundColor"], "#FCFBFA")
+        self.assertEqual(theme["backgroundColor"], "#FFEA8A")
         self.assertEqual(theme["secondaryBackgroundColor"], "#CBDBF2")
         self.assertEqual(theme["textColor"], "#1C2042")
 
@@ -421,14 +421,35 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             "#1c2042",
             "#ffed8e",
             "#ffea8a",
+            "#35aec0",
             "#efd6db",
             "#cbdbf2",
             "#badbe5",
+            "#dc3f40",
+            "#ff7618",
             "#fcfbfa",
         ):
             self.assertIn(color, style)
         self.assertIn("::selection", style)
         self.assertIn("::-moz-selection", style)
+        self.assertGreaterEqual(
+            style.count("background: var(--igt-blue-strong)"),
+            2,
+        )
+        self.assertIn("background-attachment: fixed", style)
+        self.assertIn("var(--igt-hero-yellow) 0%", style)
+        self.assertIn("background: var(--igt-hero-blue)", style)
+        self.assertIn('[class*="st-key-suggestion_"]', style)
+        self.assertIn('[class*="st-key-new_conversation"]', style)
+        self.assertIn(
+            '[aria-selected="true"][data-baseweb="tab"]',
+            style,
+        )
+        self.assertIn("background: var(--igt-red)", style)
+        self.assertGreaterEqual(
+            style.count("background: var(--igt-orange)"),
+            2,
+        )
         self.assertIn('[data-baseweb="tab"] *', style)
         self.assertIn('[data-testid="stchatinput"] textarea', style)
         self.assertTrue(
