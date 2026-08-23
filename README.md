@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 10 complete
+## Current status: Phase 10 complete with Streamlit UI and experiment dashboard
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -49,7 +49,9 @@ Phase 9 wraps the selected retrieval and generation components in a LangGraph `S
 
 Phase 10 compares all eight PRD system versions on the same 15-question dataset. It reuses the recorded results for six versions, runs the two missing end-to-end combinations, adds deterministic claim-level faithfulness and refusal scoring, measures average and p95 latency, and records per-question gains, losses, costs, and a recommendation.
 
-No post-Phase-10 work is included. The experiment dashboard, Streamlit interface, deployment, and later phases remain unimplemented.
+The Streamlit application provides the PRD's focused question-and-answer experience plus a read-only experiment dashboard. The Ask tab uses the selected dense pipeline and displays grounded answers with resolved source citations. The Experiments tab compares the eight measured Phase 10 versions and explains what changed, what stayed constant, gains, regressions, latency cost, and whether the result justified the change.
+
+No other post-Phase-10 work is included. The RAG developer/debug mode, deployment, and later phases remain unimplemented.
 
 ## Run the Phase 1 notebook
 
@@ -84,6 +86,21 @@ uv run python evaluation/run_phase1.py --rebuild-namespace
 ```
 
 The runner never deletes the whole index. Its single-question artifact is written to `evaluation/results/phase1/run.json` and contains the public configuration, corpus and chunk fingerprints, indexing action, retrieved chunks, resolved citations, answer, and latency. It does not execute or score the Phase 2 evaluation dataset.
+
+## Run the Streamlit user interface
+
+Populate `.env`, keep Ollama running, and index the configured Pinecone namespace with the Phase 1 runner if it is empty. Then start the application from the repository root:
+
+```bash
+uv sync
+uv run streamlit run app.py
+```
+
+The Ask tab reads the same typed settings and `.env` file as the Python runners. It connects only after a non-empty question is submitted, caches the read-only RAG connection for subsequent questions, and displays only sources actually cited in the answer. Connection and configuration failures are shown in the page instead of crashing it.
+
+The Experiments tab reads `evaluation/results/phase10_final/comparison.json`; it never launches or reruns experiments. If that artifact is unavailable, the page provides the Phase 10 runner command needed to generate it. The dashboard includes the measured configuration matrix, Recall@5, strict faithfulness, average latency, the selected recommendation, and a per-experiment PRD trade-off analysis.
+
+The application intentionally has no live configuration editor, retrieval diagnostics, or RAG developer/debug mode.
 
 ## Notebook interfaces for Phases 2–10
 
@@ -380,6 +397,8 @@ PYTHONPATH=src uv run python -m unittest discover -s tests -v
 ## Repository layout
 
 ```text
+app.py                      # simple Streamlit question-and-answer interface
+
 data/
 ├── README.md
 ├── private/                 # ignored; local personal documents only
@@ -469,6 +488,8 @@ src/i_got_this_rag/
 ├── agentic_rag.py           # Phase 9 LangGraph state, nodes, and routing
 ├── agentic_experiments.py   # Phase 9 config and guarded namespace indexing
 ├── final_evaluation.py      # Phase 10 scoring, comparison, and analysis
+├── experiment_dashboard.py  # measured experiment matrix and trade-off projection
+├── user_interface.py        # UI-facing answer and citation projection
 └── settings.py              # typed environment configuration
 
 tests/
@@ -482,7 +503,9 @@ tests/
 ├── test_phase7_metadata.py
 ├── test_phase8_query_transformation.py
 ├── test_phase9_agentic_rag.py
-└── test_phase10_final_evaluation.py
+├── test_phase10_final_evaluation.py
+├── test_experiment_dashboard.py
+└── test_streamlit_user_interface.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

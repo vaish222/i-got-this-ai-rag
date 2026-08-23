@@ -298,4 +298,4 @@ The historical source experiments were executed at different times, so the laten
 
 ## Phase boundary
 
-Phase 10 implements final cross-version evaluation only. The experiment dashboard, Streamlit UI, deployment, and all later phases remain intentionally unimplemented.
+Phase 10 implements final cross-version evaluation. The Streamlit application in `app.py` provides both the simple user interface and a read-only dashboard over these measured results. RAG developer/debug mode, deployment, and all later phases remain intentionally unimplemented.
