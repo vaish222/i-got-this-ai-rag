@@ -41,6 +41,7 @@ SUGGESTED_QUESTIONS = (
     ("🎒", "What should I prepare for this weekend?"),
     ("🎁", "Which birthdays still need gifts?"),
 )
+PENDING_PROMPT_KEY = "pending_prompt"
 
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
@@ -165,6 +166,10 @@ def render_chat_response(response: AnswerView) -> None:
         render_sources(response)
 
 
+def queue_suggested_question(question: str) -> None:
+    st.session_state[PENDING_PROMPT_KEY] = question
+
+
 def render_question_answer() -> None:
     conversation = st.session_state.setdefault("conversation", [])
     toolbar_left, toolbar_right = st.columns([3, 1])
@@ -174,6 +179,7 @@ def render_question_answer() -> None:
     with toolbar_right:
         if st.button("↻ New conversation", width="stretch"):
             st.session_state["conversation"] = []
+            st.session_state.pop(PENDING_PROMPT_KEY, None)
             st.rerun()
 
     if not conversation:
@@ -182,19 +188,18 @@ def render_question_answer() -> None:
                 "Hi! I can help connect schedules, deadlines, invitations, "
                 "gifts, and family commitments. What would you like to figure out?"
             )
-        st.markdown("##### Try asking")
-        suggestion_columns = st.columns(2)
-        suggested_prompt: str | None = None
-        for index, (icon, question) in enumerate(SUGGESTED_QUESTIONS):
-            with suggestion_columns[index % 2]:
-                if st.button(
-                    f"{icon} {question}",
-                    key=f"suggestion_{index}",
-                    width="stretch",
-                ):
-                    suggested_prompt = question
-    else:
-        suggested_prompt = None
+
+    st.markdown("##### Try asking")
+    suggestion_columns = st.columns(2)
+    for index, (icon, question) in enumerate(SUGGESTED_QUESTIONS):
+        with suggestion_columns[index % 2]:
+            st.button(
+                f"{icon} {question}",
+                key=f"suggestion_{index}",
+                width="stretch",
+                on_click=queue_suggested_question,
+                args=(question,),
+            )
 
     for response in conversation:
         if not isinstance(response, AnswerView):
@@ -206,6 +211,7 @@ def render_question_answer() -> None:
     typed_prompt = st.chat_input(
         "Ask what's next, what to prepare, or what you might be forgetting…"
     )
+    suggested_prompt = st.session_state.pop(PENDING_PROMPT_KEY, None)
     prompt = suggested_prompt or typed_prompt
     if not prompt:
         return
@@ -239,6 +245,7 @@ def render_question_answer() -> None:
             st.markdown(response.answer)
             render_sources(response)
         conversation.append(response)
+        st.rerun()
     except Exception as exc:  # Streamlit is the user-facing error boundary.
         st.error(str(exc))
 

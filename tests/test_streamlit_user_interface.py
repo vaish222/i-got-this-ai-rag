@@ -25,6 +25,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
     ConversationTurn,
 )
 from i_got_this_rag.user_interface import (  # noqa: E402
+    AnswerView,
     answer_question,
     expand_cited_section_headings,
     format_answer_for_display,
@@ -431,6 +432,40 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             },
         )
         self.assertEqual([tab.label for tab in app.tabs], ["Ask", "Experiments"])
+
+    def test_suggested_questions_remain_available_after_an_answer(self) -> None:
+        previous_response = AnswerView(
+            question="Which invitations still need an RSVP?",
+            retrieval_question="Which invitations still need an RSVP?",
+            answer="The neighborhood potluck still needs a response [S1].",
+            sources=(),
+            used_conversation_context=False,
+        )
+        app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
+        app.session_state["conversation"] = [previous_response]
+
+        app.run(timeout=20)
+
+        self.assertEqual(app.exception, [])
+        self.assertEqual(
+            {button.label for button in app.button},
+            {
+                "↻ New conversation",
+                "📅 What's coming up this week?",
+                "💌 Which invitations still need an RSVP?",
+                "🎒 What should I prepare for this weekend?",
+                "🎁 Which birthdays still need gifts?",
+            },
+        )
+        self.assertEqual(len(app.chat_message), 2)
+        self.assertEqual(
+            app.chat_message[0].markdown[0].value,
+            previous_response.question,
+        )
+        self.assertEqual(
+            app.chat_message[1].markdown[0].value,
+            previous_response.answer,
+        )
 
     def test_empty_question_is_rejected_without_calling_pipeline(self) -> None:
         with self.assertRaisesRegex(ValueError, "Enter a question"):
