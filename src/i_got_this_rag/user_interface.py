@@ -5,6 +5,7 @@ from typing import Protocol
 
 from langchain_core.documents import Document
 
+from .agentic_rag import CitationAttributor
 from .evaluation import extract_citations, serialize_retrieval
 
 
@@ -46,7 +47,8 @@ def answer_question(
 ) -> AnswerView:
     normalized = normalize_question(question)
     results = pipeline.retrieve(normalized)
-    answer = pipeline.generate(normalized, results)
+    generated_answer = pipeline.generate(normalized, results)
+    answer = CitationAttributor().attribute(generated_answer, results)
     retrieved_chunks = serialize_retrieval(results)
     chunks_by_rank = {int(chunk["rank"]): chunk for chunk in retrieved_chunks}
 

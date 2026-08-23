@@ -101,6 +101,26 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertIsNone(response.sources[0].page_number)
         self.assertEqual(response.sources[1].page_number, 2)
 
+    def test_supported_uncited_answer_is_attributed_before_display(self) -> None:
+        response = answer_question(
+            FakePipeline("The field trip form is due Friday."),
+            "When is the field trip form due?",
+        )
+
+        self.assertEqual(response.answer, "The field trip form is due Friday. [S1]")
+        self.assertEqual(len(response.sources), 1)
+        self.assertEqual(response.sources[0].label, "S1")
+        self.assertEqual(response.sources[0].title, "Elementary School Newsletter")
+
+    def test_unsupported_uncited_answer_does_not_receive_false_citation(self) -> None:
+        response = answer_question(
+            FakePipeline("The field trip form is due Monday."),
+            "When is the field trip form due?",
+        )
+
+        self.assertNotIn("[S", response.answer)
+        self.assertEqual(response.sources, ())
+
     def test_duplicate_and_unresolved_citations_are_not_displayed(self) -> None:
         pipeline = FakePipeline("The form is due Friday [S1][S1][S9].")
 

@@ -96,7 +96,7 @@ uv sync
 uv run streamlit run app.py
 ```
 
-The Ask tab reads the same typed settings and `.env` file as the Python runners. It connects only after a non-empty question is submitted, caches the read-only RAG connection for subsequent questions, and displays only sources actually cited in the answer. Connection and configuration failures are shown in the page instead of crashing it.
+The Ask tab reads the same typed settings and `.env` file as the Python runners. It connects only after a non-empty question is submitted and caches the read-only RAG connection for subsequent questions. If the small local model omits citations, the existing deterministic citation attributor adds a source label only when the claim's concrete facts and informative terms match retrieved evidence; unsupported claims never receive a fabricated citation. The interface then displays only sources actually cited in the answer. Connection and configuration failures are shown in the page instead of crashing it.
 
 The Experiments tab reads `evaluation/results/phase10_final/comparison.json`; it never launches or reruns experiments. If that artifact is unavailable, the page provides the Phase 10 runner command needed to generate it. The dashboard includes the measured configuration matrix, Recall@5, strict faithfulness, average latency, the selected recommendation, and a per-experiment PRD trade-off analysis.
 
