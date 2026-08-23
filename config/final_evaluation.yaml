@@ -1,0 +1,43 @@
+schema_version: "1.0"
+experiment_id: E800_phase10_final_comparison
+experiment_name: Phase 10 final cross-version evaluation
+runtime_namespace: phase10-final-500
+hybrid_candidate_k: 20
+final_top_k: 5
+rrf_k: 60
+bm25_k1: 1.5
+bm25_b: 0.75
+faithfulness_method: phase10-deterministic-grounding-v1
+versions:
+  - version_id: baseline_dense
+    label: Baseline dense RAG
+    source_results_path: evaluation/results/E001_dense_baseline/results.json
+    mechanism: Dense Top-5 with embeddinggemma and 500/75 chunks.
+  - version_id: best_chunking
+    label: Best chunking
+    source_results_path: evaluation/results/phase3_chunking/E102_dense_chunk500/results.json
+    mechanism: Selected 500-token chunks with 75-token overlap and dense Top-5.
+  - version_id: best_embedding
+    label: Best embedding
+    source_results_path: evaluation/results/phase4_embeddings/E203_dense_mxbai/results.json
+    mechanism: Dense Top-5 with the strongest measured Phase 4 model, mxbai-embed-large.
+  - version_id: hybrid_retrieval
+    label: Hybrid retrieval
+    source_results_path: evaluation/results/phase5_retrieval/E303_hybrid/results.json
+    mechanism: Dense and local BM25 rankings fused by reciprocal-rank fusion to Top-5.
+  - version_id: hybrid_reranker
+    label: Hybrid + reranker
+    runtime_experiment_id: E801_phase10_hybrid_bm25
+    mechanism: Hybrid RRF Top-20 candidates reranked by deterministic BM25 to final Top-5.
+  - version_id: metadata_aware
+    label: Metadata-aware
+    source_results_path: evaluation/results/phase7_metadata/E502_dense_metadata_filtered/results.json
+    mechanism: Metadata-filtered dense retrieval with unfiltered dense fallback to Top-5.
+  - version_id: query_rewriting
+    label: Query rewriting
+    source_results_path: evaluation/results/phase8_query_transformation/E602_dense_llm_rewrite/results.json
+    mechanism: One guarded local-LLM retrieval rewrite followed by dense Top-5.
+  - version_id: langgraph_workflow
+    label: LangGraph workflow
+    runtime_experiment_id: E802_phase10_langgraph
+    mechanism: Phase 9 conditional graph with evidence grading, one retry, and grounding refusal.

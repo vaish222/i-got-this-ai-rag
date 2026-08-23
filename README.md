@@ -2,7 +2,7 @@
 
 A privacy-first personal and family knowledge assistant, developed incrementally from a controlled RAG dataset.
 
-## Current status: Phase 9 complete
+## Current status: Phase 10 complete
 
 The Phase 0 controlled dataset remains unchanged:
 
@@ -47,7 +47,9 @@ Phase 8 adds local LLM query rewriting and multi-query retrieval. It compares th
 
 Phase 9 wraps the selected retrieval and generation components in a LangGraph `StateGraph`. It analyzes intent, builds metadata filters, retrieves dense Top-5 evidence, retains a reranking node with the Phase 6-selected disabled setting, grades evidence, permits one guarded query-rewrite retry, verifies grounding, and returns the explicit insufficient-information response when evidence or support checks fail.
 
-No Phase 10+ work is included: the final cross-version Recall@5, faithfulness, and latency evaluation remains unimplemented, as do dashboard and UI phases.
+Phase 10 compares all eight PRD system versions on the same 15-question dataset. It reuses the recorded results for six versions, runs the two missing end-to-end combinations, adds deterministic claim-level faithfulness and refusal scoring, measures average and p95 latency, and records per-question gains, losses, costs, and a recommendation.
+
+No post-Phase-10 work is included. The experiment dashboard, Streamlit interface, deployment, and later phases remain unimplemented.
 
 ## Run the Phase 1 notebook
 
@@ -83,9 +85,9 @@ uv run python evaluation/run_phase1.py --rebuild-namespace
 
 The runner never deletes the whole index. Its single-question artifact is written to `evaluation/results/phase1/run.json` and contains the public configuration, corpus and chunk fingerprints, indexing action, retrieved chunks, resolved citations, answer, and latency. It does not execute or score the Phase 2 evaluation dataset.
 
-## Notebook interfaces for Phases 2–9
+## Notebook interfaces for Phases 2–10
 
-Every implemented phase now has a notebook under `notebooks/`. Phases 2–9 delegate to the same tested command-line runners documented below, then load the generated JSON artifacts for interactive inspection. This keeps pipeline logic in `src/i_got_this_rag/` instead of duplicating it in notebook cells.
+Every implemented phase now has a notebook under `notebooks/`. Phases 2–10 delegate to the same tested command-line runners documented below, then load the generated JSON artifacts for interactive inspection. This keeps pipeline logic in `src/i_got_this_rag/` instead of duplicating it in notebook cells.
 
 The experiment notebooks default to `RUN_EXPERIMENT = False`. Review their parameters and configuration previews, change the switch to `True`, and run the execution cell when you are ready to connect to Ollama and Pinecone. Namespace-mutating runners retain their existing phase-prefix guards.
 
@@ -100,6 +102,7 @@ The experiment notebooks default to `RUN_EXPERIMENT = False`. Review their param
 | 7 | [Metadata-aware retrieval](notebooks/phase_7_metadata_experiments.ipynb) |
 | 8 | [Query transformation](notebooks/phase_8_query_transformation_experiments.ipynb) |
 | 9 | [LangGraph agentic RAG](notebooks/phase_9_langgraph_agentic_rag.ipynb) |
+| 10 | [Final evaluation](notebooks/phase_10_final_evaluation.ipynb) |
 
 ## Run the Phase 2 baseline evaluation
 
@@ -330,7 +333,43 @@ The runner rebuilds only its guarded `phase9-*` namespace and writes the state, 
 evaluation/results/phase9_agentic/run.json
 ```
 
-This is a single-workflow execution artifact, not the Phase 10 cross-version evaluation.
+This remains the Phase 9 single-workflow artifact. Use the Phase 10 runner for the cross-version comparison.
+
+## Run the Phase 10 final evaluation
+
+Phase 10 evaluates the exact eight versions named in the PRD. Keep Ollama running, configure Pinecone in `.env`, and make sure the Phase 2–8 experiment artifacts are present before running:
+
+```bash
+uv run python evaluation/run_final_evaluation.py
+```
+
+The runner re-scores six recorded experiments and executes the two combinations that did not previously have standalone artifacts: hybrid Top-20 followed by the BM25 reranker, and the LangGraph workflow over all 15 questions. It rebuilds only the guarded `phase10-*` namespace.
+
+Faithfulness is a conservative deterministic full-answer grounding score. An answerable response receives credit only when every material claim has a valid retrieved citation and the grounding verifier accepts its facts; an unanswerable question receives credit only for the explicit refusal. It is reproducible and auditable, but it is stricter than a semantic LLM judge.
+
+The verified run measured:
+
+| Version | Recall@5 | Faithfulness | Avg. latency | p95 latency |
+|---|---:|---:|---:|---:|
+| Baseline dense RAG | **0.900** | 0.400 | **1.453 s** | 3.257 s |
+| Best chunking (500/75) | **0.900** | 0.400 | 1.532 s | 3.476 s |
+| Best embedding (`mxbai-embed-large`) | 0.873 | **0.467** | 1.649 s | 4.410 s |
+| Hybrid retrieval | 0.840 | **0.467** | 1.499 s | 3.679 s |
+| Hybrid + BM25 reranker | 0.738 | **0.467** | 1.627 s | 4.427 s |
+| Metadata-aware retrieval | **0.900** | 0.400 | 1.810 s | 3.789 s |
+| One guarded query rewrite | 0.865 | 0.333 | 1.704 s | 3.770 s |
+| LangGraph workflow | **0.900** | 0.333 | 1.789 s | 3.496 s |
+
+Baseline dense RAG is the current recommendation: it ties for best Recall@5, is fastest, and correctly refuses both unanswerable questions. None of the tested versions reaches the 0.90 faithfulness target, so generation grounding remains the main improvement area. Historical experiments were run at different times, so latency differences are measured costs rather than a simultaneous benchmark.
+
+Outputs are written to:
+
+```text
+evaluation/results/phase10_final/
+├── config.json
+├── comparison.json
+└── analysis.md
+```
 
 Run all offline tests with:
 
@@ -383,7 +422,8 @@ config/query_experiments/
 └── query_multi.yaml
 
 config/
-└── agentic_rag.yaml         # Phase 9 graph and retry configuration
+├── agentic_rag.yaml         # Phase 9 graph and retry configuration
+└── final_evaluation.yaml    # Phase 10 exact comparison matrix
 
 evaluation/
 ├── README.md
@@ -397,6 +437,7 @@ evaluation/
 ├── run_metadata_experiments.py # Phase 7 controlled experiment runner
 ├── run_query_experiments.py # Phase 8 controlled experiment runner
 ├── run_agentic_rag.py       # Phase 9 single-workflow runner
+├── run_final_evaluation.py  # Phase 10 cross-version runner
 └── results/                 # generated experiment config and results
 
 notebooks/
@@ -408,7 +449,8 @@ notebooks/
 ├── phase_6_reranking_experiments.ipynb
 ├── phase_7_metadata_experiments.ipynb
 ├── phase_8_query_transformation_experiments.ipynb
-└── phase_9_langgraph_agentic_rag.ipynb
+├── phase_9_langgraph_agentic_rag.ipynb
+└── phase_10_final_evaluation.ipynb
 
 src/i_got_this_rag/
 ├── baseline.py              # read-only connection to the Phase 1 pipeline
@@ -426,6 +468,7 @@ src/i_got_this_rag/
 ├── query_experiments.py     # Phase 8 config, impact analysis, and guarded indexing
 ├── agentic_rag.py           # Phase 9 LangGraph state, nodes, and routing
 ├── agentic_experiments.py   # Phase 9 config and guarded namespace indexing
+├── final_evaluation.py      # Phase 10 scoring, comparison, and analysis
 └── settings.py              # typed environment configuration
 
 tests/
@@ -438,7 +481,8 @@ tests/
 ├── test_phase6_reranking.py
 ├── test_phase7_metadata.py
 ├── test_phase8_query_transformation.py
-└── test_phase9_agentic_rag.py
+├── test_phase9_agentic_rag.py
+└── test_phase10_final_evaluation.py
 
 pyproject.toml               # uv environment and notebook dependencies
 ```

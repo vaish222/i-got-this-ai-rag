@@ -17,7 +17,7 @@ Relative dates are evaluated as of **2026-08-20** in `America/Los_Angeles`.
 
 ## Notebook interfaces
 
-Phases 2–9 have matching notebooks in `notebooks/`. Each notebook delegates execution to the phase's tested runner and reads the same generated JSON artifacts described in this document. The notebooks default to dry-run mode (`RUN_EXPERIMENT = False`) so opening or running exploratory cells cannot unexpectedly rebuild a Pinecone namespace or start a multi-model experiment.
+Phases 2–10 have matching notebooks in `notebooks/`. Each notebook delegates execution to the phase's tested runner and reads the same generated JSON artifacts described in this document. The notebooks default to dry-run mode (`RUN_EXPERIMENT = False`) so opening or running exploratory cells cannot unexpectedly rebuild a Pinecone namespace or start a multi-model experiment.
 
 Select the repository `.venv` kernel, review the parameters, set `RUN_EXPERIMENT = True`, and run the execution cell when ready. Phase-specific namespace guards and controlled-variable validation remain enforced by the underlying runner.
 
@@ -254,8 +254,48 @@ Evidence grading occurs before generation. If the local model omits citations, d
 
 The runner writes `evaluation/results/phase9_agentic/run.json`, including the full serializable graph state, node trace, query and retrieval histories, evidence grades, answer, citations, grounding decision, and latency. It rebuilds only namespaces beginning with `phase9-`.
 
-This runner validates a single Phase 9 workflow. It intentionally does not run the Phase 10 cross-version evaluation or populate Recall@5, faithfulness, and latency comparisons.
+This runner remains the single-question Phase 9 interface. The Phase 10 runner performs the full cross-version comparison.
+
+## Phase 10 final evaluation
+
+Phase 10 compares the exact eight system versions required by the PRD: baseline dense RAG, selected 500/75 chunking, selected `mxbai-embed-large` embedding, hybrid retrieval, hybrid plus BM25 reranking, metadata-aware retrieval, one guarded query rewrite, and the LangGraph workflow.
+
+Run it from the repository root after generating the Phase 2–8 source artifacts:
+
+```bash
+uv run python evaluation/run_final_evaluation.py
+```
+
+Six versions are reconstructed from their recorded per-question artifacts. The runner executes the two missing end-to-end variants over all 15 questions, using a guarded `phase10-final-500` namespace: hybrid RRF Top-20 followed by BM25 candidate reranking to Top-5, and the Phase 9 LangGraph workflow. Source artifact hashes are retained in the comparison for provenance.
+
+Faithfulness uses `phase10-deterministic-grounding-v1`. Answerable responses score 1 only when all material claims resolve to retrieved citations and pass the deterministic grounding verifier; unanswerable responses score 1 only for the standard explicit refusal. This deliberately strict, reproducible lower-bound metric should not be interpreted as an LLM-as-judge semantic score.
+
+The verified comparison is:
+
+| Version | Recall@5 | Faithfulness | Avg. latency | Correct refusal rate |
+|---|---:|---:|---:|---:|
+| Baseline dense RAG | **0.900** | 0.400 | **1.453 s** | 1.000 |
+| Best chunking (500/75) | **0.900** | 0.400 | 1.532 s | 1.000 |
+| Best embedding (`mxbai-embed-large`) | 0.873 | **0.467** | 1.649 s | 1.000 |
+| Hybrid retrieval | 0.840 | **0.467** | 1.499 s | 1.000 |
+| Hybrid + BM25 reranker | 0.738 | **0.467** | 1.627 s | 1.000 |
+| Metadata-aware retrieval | **0.900** | 0.400 | 1.810 s | 1.000 |
+| One guarded query rewrite | 0.865 | 0.333 | 1.704 s | 1.000 |
+| LangGraph workflow | **0.900** | 0.333 | 1.789 s | 1.000 |
+
+Baseline dense RAG is selected because it ties for the highest Recall@5, has the lowest average latency, and refuses both unanswerable questions correctly. The embedding and hybrid variants improve strict faithfulness by 0.067 but lose Recall@5. Hybrid reranking has the largest retrieval regression. Metadata filtering preserves aggregate quality but adds latency; rewriting and LangGraph add latency without improving this dataset's aggregate scores. No version reaches the 0.90 faithfulness target.
+
+Generated outputs:
+
+```text
+evaluation/results/phase10_final/
+├── config.json       # resolved comparison specification and source hashes
+├── comparison.json   # aggregate/category/question results and recommendation
+└── analysis.md       # concise why-better, why-worse, and cost analysis
+```
+
+The historical source experiments were executed at different times, so the latency column is useful for observed cost comparison but is not a simultaneous benchmark.
 
 ## Phase boundary
 
-Phase 9 implements LangGraph orchestration, evidence grading, one bounded retry, and grounding-based refusal. Phase 10 final cross-version evaluation and later dashboard/UI work remain intentionally unimplemented.
+Phase 10 implements final cross-version evaluation only. The experiment dashboard, Streamlit UI, deployment, and all later phases remain intentionally unimplemented.

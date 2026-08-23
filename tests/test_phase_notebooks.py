@@ -16,6 +16,7 @@ NOTEBOOKS = {
     7: ("phase_7_metadata_experiments.ipynb", "evaluation/run_metadata_experiments.py"),
     8: ("phase_8_query_transformation_experiments.ipynb", "evaluation/run_query_experiments.py"),
     9: ("phase_9_langgraph_agentic_rag.ipynb", "evaluation/run_agentic_rag.py"),
+    10: ("phase_10_final_evaluation.ipynb", "evaluation/run_final_evaluation.py"),
 }
 
 
@@ -48,7 +49,7 @@ class PhaseNotebookTests(unittest.TestCase):
                 )
                 self.assertIn(Path(runner).name, source)
                 self.assertIn("RUN_EXPERIMENT = False", source)
-                self.assertNotIn("phase_10", source.lower())
+                self.assertNotIn("import streamlit", source.lower())
 
     def test_all_new_notebook_code_cells_parse_and_have_no_saved_outputs(self) -> None:
         for phase, (filename, _) in NOTEBOOKS.items():
