@@ -1,0 +1,12 @@
+experiment_id: D1_current_model
+label: Current local model + strict prompt
+provider: ollama
+api_style: ollama
+model_env: OLLAMA_CHAT_MODEL
+model_default: gemma3:1b
+base_url_env: OLLAMA_BASE_URL
+base_url_default: http://localhost:11434
+api_key_env: null
+timeout_seconds: 30
+max_retries: 0
+

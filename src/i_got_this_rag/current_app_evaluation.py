@@ -8,6 +8,10 @@ from typing import Any, Sequence
 from langchain_core.documents import Document
 
 from .baseline import REFUSAL_TEXT
+from .chat_models import (
+    ChatModelConfigurationError,
+    MissingChatModelAPIKeyError,
+)
 from .conversation import ConversationQueryRewriter, ConversationTurn
 from .evaluation import (
     EvaluationDataset,
@@ -107,6 +111,47 @@ def answer_relevance_correctness(
     return 2 * precision * recall / (precision + recall) if overlap else 0.0
 
 
+def classify_generation_error(exc: Exception) -> dict[str, str]:
+    name = type(exc).__name__
+    message = str(exc).strip() or name
+    lowered = f"{name} {message}".casefold()
+    if isinstance(exc, MissingChatModelAPIKeyError):
+        error_type = "missing_api_key"
+    elif isinstance(exc, ChatModelConfigurationError):
+        error_type = "invalid_provider_configuration"
+    elif "timeout" in lowered or "timed out" in lowered:
+        error_type = "api_timeout"
+    elif (
+        "notfound" in lowered
+        or "not found" in lowered
+        or "unknown model" in lowered
+        or "404" in lowered
+    ):
+        error_type = "unavailable_model"
+    elif (
+        "validationerror" in lowered
+        or "jsondecode" in lowered
+        or "invalid json" in lowered
+        or "malformed" in lowered
+        or "structured output" in lowered
+        or "response_format" in lowered
+        or "json schema" in lowered
+    ):
+        error_type = "malformed_model_response"
+    else:
+        error_type = "model_provider_error"
+    safe_message = re.sub(
+        r"(?i)(?:bearer\s+|api[_ -]?key[=:]\s*)[A-Za-z0-9._-]+",
+        "[redacted credential]",
+        message,
+    )
+    return {
+        "type": error_type,
+        "exception": name,
+        "message": safe_message[:500],
+    }
+
+
 def _selected_results(
     pipeline: CapturingPipeline,
     response: AnswerView,
@@ -121,6 +166,8 @@ def _selected_results(
 def evaluate_current_app(
     pipeline: Any,
     dataset: EvaluationDataset,
+    *,
+    continue_on_generation_error: bool = False,
 ) -> dict[str, Any]:
     captured = CapturingPipeline(pipeline)
     scorer = DeterministicFaithfulnessScorer()
@@ -130,11 +177,24 @@ def evaluate_current_app(
         captured.last_results = []
         captured.last_generation_trace = None
         started = perf_counter()
-        response = answer_question(
-            captured,
-            str(question["question"]),
-            reference_date=dataset.reference_date,
-        )
+        generation_error: dict[str, str] | None = None
+        try:
+            response = answer_question(
+                captured,
+                str(question["question"]),
+                reference_date=dataset.reference_date,
+            )
+        except Exception as exc:
+            if not continue_on_generation_error:
+                raise
+            generation_error = classify_generation_error(exc)
+            response = AnswerView(
+                question=str(question["question"]),
+                retrieval_question=str(question["question"]),
+                answer="",
+                sources=(),
+                used_conversation_context=False,
+            )
         total_latency = perf_counter() - started
         results = _selected_results(captured, response)
         retrieved_chunks = serialize_retrieval(results)
@@ -164,6 +224,11 @@ def evaluate_current_app(
                 "expected_source_ids": expected_ids,
                 "retrieval_question": response.retrieval_question,
                 "retrieved_chunks": retrieved_chunks,
+                "retrieved_source_ids": [
+                    str(chunk.get("document_id"))
+                    for chunk in retrieved_chunks
+                    if chunk.get("document_id") is not None
+                ],
                 "expected_source_ranks": source_ranks,
                 "expected_source_rank": best_rank,
                 "recall_at_5": recall_at_5,
@@ -174,6 +239,7 @@ def evaluate_current_app(
                 "answer_relevance_correctness": round(correctness, 6),
                 "generation_trace": response.generation_trace
                 or captured.last_generation_trace,
+                "generation_error": generation_error,
                 "total_latency_seconds": round(total_latency, 6),
             }
         )
@@ -207,6 +273,9 @@ def evaluate_current_app(
             "mean_total_latency_seconds": mean(
                 float(item["total_latency_seconds"]) for item in items
             ),
+            "generation_failure_count": sum(
+                item["generation_error"] is not None for item in items
+            ),
         }
 
     return {
@@ -234,6 +303,13 @@ def evaluate_current_app(
             ),
             "retrieval_failure_count": sum(
                 float(item["recall_at_5"]) < 1.0 for item in answerable
+            ),
+            "generation_failure_count": sum(
+                item["generation_error"] is not None for item in question_results
+            ),
+            "generation_success_rate": mean(
+                1.0 if item["generation_error"] is None else 0.0
+                for item in question_results
             ),
         },
         "category_summary": categories,

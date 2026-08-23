@@ -103,6 +103,57 @@ class CurrentAppBenchmark:
         }
 
 
+@dataclass(frozen=True)
+class GenerationModelRow:
+    experiment_id: str
+    label: str
+    provider: str
+    model: str
+    run_status: str
+    recall_at_5: float
+    faithfulness: float
+    relevance_correctness: float
+    correct_refusal_rate: float
+    average_latency_seconds: float
+    p95_latency_seconds: float
+    generation_failure_count: int
+    configuration_error: dict[str, Any] | None
+
+    def table_record(self) -> dict[str, str | float | int | None]:
+        completed = self.run_status == "complete"
+        return {
+            "Model": self.model or "Not configured",
+            "Provider": self.provider,
+            "Recall@5": self.recall_at_5,
+            "Faithfulness": self.faithfulness if completed else None,
+            "Relevance": self.relevance_correctness if completed else None,
+            "Refusal": self.correct_refusal_rate if completed else None,
+            "Avg. latency (s)": self.average_latency_seconds if completed else None,
+            "P95 latency (s)": self.p95_latency_seconds if completed else None,
+            "Failures": self.generation_failure_count,
+            "Status": self.run_status.replace("_", " ").title(),
+        }
+
+
+@dataclass(frozen=True)
+class GenerationModelDashboard:
+    completed_at: str
+    rows: tuple[GenerationModelRow, ...]
+    eligible_experiment_ids: tuple[str, ...]
+    highest_faithfulness_ids: tuple[str, ...]
+    highest_relevance_ids: tuple[str, ...]
+    lowest_latency_ids: tuple[str, ...]
+    best_balance_ids: tuple[str, ...]
+    balance_method: str
+
+    def labels_for(self, experiment_ids: tuple[str, ...]) -> str:
+        labels = {
+            row.experiment_id: f"{row.label} ({row.provider}/{row.model})"
+            for row in self.rows
+        }
+        return ", ".join(labels.get(item, item) for item in experiment_ids)
+
+
 COMMON_CONSTANTS = (
     "20-document controlled corpus; 500/75 chunks; final Top-5 context; "
     "gemma3:1b generation; the same 15 evaluation questions and reference date."
@@ -339,3 +390,82 @@ def load_current_app_benchmark(path: Path) -> CurrentAppBenchmark:
         regression_pass_rate=float(regressions["pass_rate"]),
         regression_cases=tuple(regressions["cases"]),
     )
+
+
+def load_generation_model_dashboard(path: Path) -> GenerationModelDashboard:
+    payload = json.loads(path.resolve().read_text(encoding="utf-8"))
+    if payload.get("experiment_suite") != "strict_prompt_generation_model_comparison":
+        raise ValueError("Unsupported generation-model comparison artifact.")
+    versions = payload.get("versions")
+    highlights = payload.get("highlights")
+    balance = payload.get("balance")
+    if not isinstance(versions, list) or not versions:
+        raise ValueError("Generation-model comparison has no model results.")
+    if not isinstance(highlights, dict) or not isinstance(balance, dict):
+        raise ValueError("Generation-model comparison highlights are missing.")
+
+    rows: list[GenerationModelRow] = []
+    for version in versions:
+        metrics = version.get("metrics")
+        if not isinstance(metrics, dict):
+            raise ValueError("A generation-model result is missing metrics.")
+        rows.append(
+            GenerationModelRow(
+                experiment_id=str(version["experiment_id"]),
+                label=str(version["label"]),
+                provider=str(version["provider"]),
+                model=str(version.get("model", "")),
+                run_status=str(version["run_status"]),
+                recall_at_5=float(metrics["recall_at_5"]),
+                faithfulness=float(metrics["faithfulness"]),
+                relevance_correctness=float(
+                    metrics["answer_relevance_correctness"]
+                ),
+                correct_refusal_rate=float(metrics["correct_refusal_rate"]),
+                average_latency_seconds=float(metrics["average_latency_seconds"]),
+                p95_latency_seconds=float(metrics["p95_latency_seconds"]),
+                generation_failure_count=int(
+                    metrics.get("generation_failure_count", 0)
+                ),
+                configuration_error=(
+                    version.get("configuration_error")
+                    if isinstance(version.get("configuration_error"), dict)
+                    else None
+                ),
+            )
+        )
+
+    def ids(name: str) -> tuple[str, ...]:
+        value = highlights.get(name, [])
+        if not isinstance(value, list):
+            raise ValueError(f"Generation-model highlight '{name}' is malformed.")
+        return tuple(str(item) for item in value)
+
+    eligible = payload.get("eligible_experiment_ids", [])
+    if not isinstance(eligible, list):
+        raise ValueError("Generation-model eligibility list is malformed.")
+    return GenerationModelDashboard(
+        completed_at=str(payload["completed_at"]),
+        rows=tuple(rows),
+        eligible_experiment_ids=tuple(str(item) for item in eligible),
+        highest_faithfulness_ids=ids("highest_faithfulness"),
+        highest_relevance_ids=ids("highest_relevance_correctness"),
+        lowest_latency_ids=ids("lowest_average_latency"),
+        best_balance_ids=ids("best_overall_balance"),
+        balance_method=str(balance.get("method", "")),
+    )
+
+
+def load_claim_faithfulness_audit(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.resolve().read_text(encoding="utf-8"))
+    if payload.get("audit_type") != "claim_level_faithfulness":
+        raise ValueError("Unsupported claim-level faithfulness audit artifact.")
+    if payload.get("answers_regenerated") is not False:
+        raise ValueError("Claim audit must reuse saved answers.")
+    if not isinstance(payload.get("model_summary"), list):
+        raise ValueError("Claim audit model summary is missing.")
+    if not isinstance(payload.get("models"), list):
+        raise ValueError("Claim audit question details are missing.")
+    if not isinstance(payload.get("conclusion"), dict):
+        raise ValueError("Claim audit conclusion is missing.")
+    return payload

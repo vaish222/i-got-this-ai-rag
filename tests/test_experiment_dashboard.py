@@ -12,8 +12,10 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     EXPERIMENT_PROFILES,
+    load_claim_faithfulness_audit,
     load_current_app_benchmark,
     load_experiment_dashboard,
+    load_generation_model_dashboard,
 )
 
 
@@ -157,6 +159,91 @@ class ExperimentDashboardTests(unittest.TestCase):
         self.assertEqual(benchmark.regression_passed_count, 7)
         self.assertEqual(benchmark.regression_case_count, 9)
         self.assertEqual(benchmark.table_record()["UI regressions"], "7/9")
+
+    def test_generation_model_dashboard_loads_metrics_and_separate_highlights(self) -> None:
+        payload = {
+            "experiment_suite": "strict_prompt_generation_model_comparison",
+            "completed_at": "2026-08-23T12:00:00+00:00",
+            "eligible_experiment_ids": ["D1", "D2"],
+            "highlights": {
+                "highest_faithfulness": ["D2"],
+                "highest_relevance_correctness": ["D1"],
+                "lowest_average_latency": ["D1"],
+                "best_overall_balance": ["D2"],
+            },
+            "balance": {"method": "A multi-metric harmonic mean."},
+            "versions": [
+                {
+                    "experiment_id": "D1",
+                    "label": "Current model",
+                    "provider": "ollama",
+                    "model": "local-model",
+                    "run_status": "complete",
+                    "configuration_error": None,
+                    "metrics": {
+                        "recall_at_5": 0.9,
+                        "faithfulness": 0.4,
+                        "answer_relevance_correctness": 0.5,
+                        "correct_refusal_rate": 1.0,
+                        "average_latency_seconds": 1.0,
+                        "p95_latency_seconds": 2.0,
+                        "generation_failure_count": 0,
+                    },
+                },
+                {
+                    "experiment_id": "D2",
+                    "label": "Hosted model",
+                    "provider": "nebius",
+                    "model": "configured-model",
+                    "run_status": "complete",
+                    "configuration_error": None,
+                    "metrics": {
+                        "recall_at_5": 0.9,
+                        "faithfulness": 0.8,
+                        "answer_relevance_correctness": 0.45,
+                        "correct_refusal_rate": 1.0,
+                        "average_latency_seconds": 1.4,
+                        "p95_latency_seconds": 3.0,
+                        "generation_failure_count": 0,
+                    },
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "models.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            dashboard = load_generation_model_dashboard(path)
+
+        self.assertEqual(dashboard.rows[0].table_record()["Relevance"], 0.5)
+        self.assertEqual(dashboard.highest_faithfulness_ids, ("D2",))
+        self.assertEqual(dashboard.lowest_latency_ids, ("D1",))
+        self.assertIn("Hosted model", dashboard.labels_for(("D2",)))
+
+    def test_generation_model_dashboard_rejects_wrong_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "models.json"
+            path.write_text(json.dumps({"experiment_suite": "wrong"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unsupported"):
+                load_generation_model_dashboard(path)
+
+    def test_claim_audit_loader_requires_saved_answer_reuse(self) -> None:
+        payload = {
+            "audit_type": "claim_level_faithfulness",
+            "answers_regenerated": False,
+            "model_summary": [],
+            "models": [],
+            "conclusion": {"code": "C"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audit.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            loaded = load_claim_faithfulness_audit(path)
+            self.assertEqual(loaded["conclusion"]["code"], "C")
+
+            payload["answers_regenerated"] = True
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "reuse saved answers"):
+                load_claim_faithfulness_audit(path)
 
 
 if __name__ == "__main__":

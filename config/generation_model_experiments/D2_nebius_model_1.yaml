@@ -1,0 +1,12 @@
+experiment_id: D2_nebius_model_1
+label: Nebius model 1 + strict prompt
+provider: nebius
+api_style: openai_compatible
+model_env: NEBIUS_MODEL_1
+model_default: ""
+base_url_env: NEBIUS_BASE_URL
+base_url_default: https://api.tokenfactory.nebius.com/v1/
+api_key_env: NEBIUS_API_KEY
+timeout_seconds: 30
+max_retries: 0
+

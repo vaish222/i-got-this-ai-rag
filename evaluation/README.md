@@ -352,6 +352,81 @@ Each configuration is saved separately under
 `config.json` and per-question `results.json`. The combined metric and delta table is
 `evaluation/results/generation_ablation/comparison.json`.
 
+## Generation model comparison
+
+The model comparison uses Mode B only: the strict grounded prompt with relevance
+filtering disabled. Retrieval is executed once for the 15 questions and cached in
+memory, so D1, D2, and D3 receive byte-for-byte equivalent serialized Top-5 evidence.
+Only the generation provider/model changes.
+
+Configure the two hosted model names and API key in `.env`:
+
+```dotenv
+NEBIUS_API_KEY=your-key
+NEBIUS_MODEL_1=your-first-model-id
+NEBIUS_MODEL_2=your-second-model-id
+```
+
+The model IDs remain configuration values in
+`config/generation_model_experiments/`; they are not embedded in the RAG pipeline.
+Run the comparison with:
+
+```bash
+uv run python evaluation/run_generation_model_experiments.py
+```
+
+Each model writes its resolved, credential-redacted configuration and its full
+per-question results separately:
+
+```text
+evaluation/results/
+├── D1_current_model/
+│   ├── config.json
+│   └── results.json
+├── D2_nebius_model_1/
+│   ├── config.json
+│   └── results.json
+├── D3_nebius_model_2/
+│   ├── config.json
+│   └── results.json
+└── generation_model_comparison.json
+```
+
+Every question records its generated answer, retrieved source IDs, active model,
+latency, scores, and any classified model error. Missing keys, invalid configuration,
+unavailable models, timeouts, and malformed structured responses are recorded without
+terminating the remaining evaluation. A model is ineligible for the dashboard's best
+metric highlights unless the run completed without generation failures and correct
+refusal remained exactly `1.000`.
+
+## Claim-level faithfulness audit
+
+The claim audit explains disagreements between the original binary, full-answer
+faithfulness score and explicit support at the factual-claim level. It reuses the
+saved D1/D2/D3 answers and their saved Top-5 chunk IDs; it does not generate new
+answers, rerun similarity search, or change the RAG pipeline.
+
+Run it with:
+
+```bash
+uv run python evaluation/run_claim_faithfulness_audit.py
+```
+
+The audit fetches the exact indexed text for those already-saved chunk IDs and writes:
+
+```text
+evaluation/results/claim_faithfulness_audit/
+├── results.json  # machine-readable per-claim support, relevance, and categories
+└── report.md     # model summary plus expandable question-by-question evidence
+```
+
+Answers with no factual claims are reported as such instead of receiving an artificial
+zero. A disagreement is flagged when the absolute difference between the original
+score and claim-level score is at least `0.25`. Grounded information that does not
+answer the question is classified as `irrelevant but grounded information`; it remains
+supported for faithfulness and is tracked as a relevance problem. The same read-only
+audit is available in the Streamlit RAG Lab.
+
 ## Phase boundary
 
 Phase 10 implements final cross-version evaluation. The Streamlit application in `app.py` provides both the simple user interface and a read-only dashboard over these measured results. RAG developer/debug mode, deployment, and all later phases remain intentionally unimplemented.

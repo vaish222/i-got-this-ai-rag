@@ -57,8 +57,10 @@ remain reproducible. Dataset conventions are documented in
 - [Ollama](https://ollama.com/)
 - A Pinecone account and API key
 
-Ollama runs embedding and answer-generation models locally. Pinecone is hosted and
-receives document chunks, metadata, generated vectors, and retrieval queries.
+Ollama runs the embedding model locally and is the default answer-generation
+provider. The generation model can also use an OpenAI-compatible endpoint. Pinecone
+is hosted and receives document chunks, metadata, generated vectors, and retrieval
+queries.
 
 ## Setup
 
@@ -85,6 +87,13 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_EMBEDDING_MODEL=embeddinggemma
 OLLAMA_CHAT_MODEL=gemma3:1b
 
+LLM_PROVIDER=ollama
+LLM_API_STYLE=ollama
+LLM_MODEL=gemma3:1b
+LLM_API_KEY=
+LLM_BASE_URL=http://localhost:11434
+LLM_TIMEOUT_SECONDS=30
+
 PINECONE_API_KEY=your-key
 PINECONE_INDEX_NAME=i-got-this-phase-1
 PINECONE_NAMESPACE=baseline
@@ -101,6 +110,11 @@ RAG_GENERATION_MODE=strict_prompt_filter
 `RAG_GENERATION_MODE` accepts `current`, `strict_prompt`, or
 `strict_prompt_filter`. The default application mode uses the strict grounded
 prompt with retrieved-context relevance filtering.
+
+`LLM_PROVIDER`, `LLM_API_STYLE`, `LLM_MODEL`, `LLM_API_KEY`, and `LLM_BASE_URL`
+configure generation independently of retrieval. `openai_compatible` can be used
+for hosted providers while Ollama continues to supply the unchanged embedding
+model.
 
 Keep Ollama running before indexing data or starting the application. On macOS,
 opening the Ollama application starts its local service; `ollama serve` can also be
@@ -178,6 +192,25 @@ uv run python evaluation/run_current_app_evaluation.py
 
 Detailed metric definitions and experiment artifacts are documented in
 [evaluation/README.md](evaluation/README.md).
+
+To compare generation models with one fixed strict prompt and one cached retrieval
+set, configure `NEBIUS_API_KEY`, `NEBIUS_MODEL_1`, and `NEBIUS_MODEL_2`, then run:
+
+```bash
+uv run python evaluation/run_generation_model_experiments.py
+```
+
+The Experiments tab displays each model's quality, refusal, latency, and run status
+without selecting a winner from a single metric.
+
+To audit those saved answers claim by claim without regenerating them, run:
+
+```bash
+uv run python evaluation/run_claim_faithfulness_audit.py
+```
+
+The resulting explainable support analysis and evaluator-disagreement flags are also
+shown in the Experiments tab.
 
 ## Tests
 

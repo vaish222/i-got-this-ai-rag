@@ -24,8 +24,11 @@ from i_got_this_rag.conversation import (  # noqa: E402
 from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     CurrentAppBenchmark,
     ExperimentDashboard,
+    GenerationModelDashboard,
+    load_claim_faithfulness_audit,
     load_current_app_benchmark,
     load_experiment_dashboard,
+    load_generation_model_dashboard,
 )
 from i_got_this_rag.settings import Settings  # noqa: E402
 from i_got_this_rag.user_interface import (  # noqa: E402
@@ -47,6 +50,16 @@ CURRENT_APP_RESULTS_PATH = (
     / "evaluation"
     / "results"
     / "phase10_current_app"
+    / "results.json"
+)
+GENERATION_MODEL_COMPARISON_PATH = (
+    PROJECT_ROOT / "evaluation" / "results" / "generation_model_comparison.json"
+)
+CLAIM_FAITHFULNESS_AUDIT_PATH = (
+    PROJECT_ROOT
+    / "evaluation"
+    / "results"
+    / "claim_faithfulness_audit"
     / "results.json"
 )
 SUGGESTED_QUESTIONS = (
@@ -450,6 +463,207 @@ def load_current_app_results(path: str, modified_at_ns: int) -> CurrentAppBenchm
     return load_current_app_benchmark(Path(path))
 
 
+@st.cache_data(show_spinner=False)
+def load_generation_model_results(
+    path: str,
+    modified_at_ns: int,
+) -> GenerationModelDashboard:
+    del modified_at_ns
+    return load_generation_model_dashboard(Path(path))
+
+
+@st.cache_data(show_spinner=False)
+def load_claim_audit_results(path: str, modified_at_ns: int) -> dict:
+    del modified_at_ns
+    return load_claim_faithfulness_audit(Path(path))
+
+
+def render_generation_model_comparison() -> None:
+    st.divider()
+    st.subheader("Generation model comparison")
+    st.caption(
+        "Single-variable experiment: every model receives the same cached Top-5 "
+        "evidence and the same strict grounding prompt. Relevance filtering is off."
+    )
+    if not GENERATION_MODEL_COMPARISON_PATH.is_file():
+        st.info(
+            "No generation-model comparison is available yet. Run "
+            "`uv run python evaluation/run_generation_model_experiments.py` "
+            "to generate it."
+        )
+        return
+    try:
+        comparison = load_generation_model_results(
+            GENERATION_MODEL_COMPARISON_PATH.as_posix(),
+            GENERATION_MODEL_COMPARISON_PATH.stat().st_mtime_ns,
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.error(f"The generation-model comparison could not be loaded: {exc}")
+        return
+
+    st.dataframe(
+        [row.table_record() for row in comparison.rows],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Recall@5": st.column_config.NumberColumn(format="%.3f"),
+            "Faithfulness": st.column_config.NumberColumn(format="%.3f"),
+            "Relevance": st.column_config.NumberColumn(format="%.3f"),
+            "Refusal": st.column_config.NumberColumn(format="%.3f"),
+            "Avg. latency (s)": st.column_config.NumberColumn(format="%.3f"),
+            "P95 latency (s)": st.column_config.NumberColumn(format="%.3f"),
+        },
+    )
+
+    if comparison.eligible_experiment_ids:
+        faithfulness, relevance, latency, balance = st.columns(4)
+        faithfulness.markdown("**Highest faithfulness**")
+        faithfulness.write(
+            comparison.labels_for(comparison.highest_faithfulness_ids)
+        )
+        relevance.markdown("**Highest relevance/correctness**")
+        relevance.write(comparison.labels_for(comparison.highest_relevance_ids))
+        latency.markdown("**Lowest average latency**")
+        latency.write(comparison.labels_for(comparison.lowest_latency_ids))
+        balance.markdown("**Best overall balance**")
+        balance.write(comparison.labels_for(comparison.best_balance_ids))
+        st.caption(
+            "Overall balance is a multi-metric comparison, not an automatic model "
+            f"recommendation. {comparison.balance_method}"
+        )
+    else:
+        st.warning(
+            "No model is eligible for highlights. A run must complete without "
+            "generation failures and preserve correct refusal at 1.000."
+        )
+
+    failed_rows = [
+        row for row in comparison.rows if row.run_status != "complete"
+    ]
+    if failed_rows:
+        with st.expander("Model configuration and API failures"):
+            for row in failed_rows:
+                error = row.configuration_error or {}
+                st.write(
+                    f"**{row.label}:** {error.get('message', row.run_status)}"
+                )
+    st.caption(f"Model comparison completed: {comparison.completed_at}")
+
+
+def render_claim_faithfulness_audit() -> None:
+    st.divider()
+    st.subheader("Claim-level faithfulness audit")
+    st.caption(
+        "Evaluation-only audit over saved answers and exact indexed chunk text. "
+        "No answers or retrieval results were regenerated."
+    )
+    if not CLAIM_FAITHFULNESS_AUDIT_PATH.is_file():
+        st.info(
+            "No claim audit is available yet. Run "
+            "`uv run python evaluation/run_claim_faithfulness_audit.py`."
+        )
+        return
+    try:
+        audit = load_claim_audit_results(
+            CLAIM_FAITHFULNESS_AUDIT_PATH.as_posix(),
+            CLAIM_FAITHFULNESS_AUDIT_PATH.stat().st_mtime_ns,
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.error(f"The claim-level audit could not be loaded: {exc}")
+        return
+
+    st.dataframe(
+        [
+            {
+                "Model": item["model"],
+                "Existing faithfulness": item["existing_faithfulness"],
+                "Claim faithfulness": item["claim_level_faithfulness"],
+                "Relevance": item["relevance_correctness"],
+                "Claims": item["total_factual_claims"],
+                "Supported": item["supported_factual_claims"],
+                "Unsupported": item["unsupported_factual_claims"],
+                "Unsupported / answer": item["unsupported_claims_per_answer"],
+                "Disagreements": item["evaluator_disagreement_count"],
+            }
+            for item in audit["model_summary"]
+        ],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Existing faithfulness": st.column_config.NumberColumn(format="%.3f"),
+            "Claim faithfulness": st.column_config.NumberColumn(format="%.3f"),
+            "Relevance": st.column_config.NumberColumn(format="%.3f"),
+            "Unsupported / answer": st.column_config.NumberColumn(format="%.3f"),
+        },
+    )
+    conclusion = audit["conclusion"]
+    st.warning(
+        f"Conclusion {conclusion['code']} — {conclusion['label']}: "
+        f"{conclusion['reason']}"
+    )
+
+    with st.expander("Unsupported-claim categories by model"):
+        st.dataframe(
+            [
+                {"Model": item["model"], **item["category_counts"]}
+                for item in audit["model_summary"]
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+
+    models = {item["model"]: item for item in audit["models"]}
+    selected_model = st.selectbox(
+        "Inspect claim evidence for a model",
+        options=list(models),
+        key="claim_audit_model",
+    )
+    for question in models[selected_model]["questions"]:
+        claim_score = question["claim_faithfulness"]
+        score_label = (
+            "no factual claims" if claim_score is None else f"{claim_score:.3f}"
+        )
+        disagreement = (
+            " · evaluator disagreement" if question["evaluator_disagreement"] else ""
+        )
+        with st.expander(
+            f"{question['question_id']} · claim score {score_label}{disagreement}"
+        ):
+            st.markdown("**Question**")
+            st.write(question["question"])
+            st.markdown("**Generated answer**")
+            st.code(question["generated_answer"], language="text")
+            st.markdown("**Retrieved context**")
+            for context in question["retrieved_chunks"]:
+                st.markdown(
+                    f"**{context['source_id']} — {context['title']}**  "
+                    f"`{context['chunk_id']}`"
+                )
+                st.code(context["text"], language="text")
+            if not question["claims"]:
+                st.info("No factual claims: explicit refusal or empty answer.")
+            for index, claim in enumerate(question["claims"], start=1):
+                st.markdown(f"**Claim {index}: {claim['claim']}**")
+                st.write(f"Supported: {'Yes' if claim['supported'] else 'No'}")
+                st.write(
+                    "Supporting sources: "
+                    + (", ".join(claim["supporting_source_ids"]) or "None")
+                )
+                st.write(f"Evidence: {claim['supporting_evidence'] or 'None'}")
+                st.write(f"Reason: {claim['reason']}")
+                st.write(f"Relevance: {claim['relevance_reason']}")
+                st.write(f"Category: {claim['category'] or 'supported and relevant'}")
+            st.write(
+                f"Automated faithfulness: {question['automated_faithfulness']:.3f}"
+            )
+            st.write(f"Claim-level faithfulness: {score_label}")
+            if question["evaluator_disagreement"]:
+                st.warning(
+                    "Evaluator disagreement — manual inspection recommended"
+                )
+    st.caption(f"Claim audit completed: {audit['completed_at']}")
+
+
 def render_experiment_dashboard() -> None:
     st.header("Experiment Dashboard")
     st.caption(
@@ -531,6 +745,9 @@ def render_experiment_dashboard() -> None:
         f"{dashboard.recommendation_rationale}"
     )
     st.caption(f"Comparison completed: {dashboard.completed_at}")
+
+    render_generation_model_comparison()
+    render_claim_faithfulness_audit()
 
     st.divider()
     st.subheader("Current app end-to-end")

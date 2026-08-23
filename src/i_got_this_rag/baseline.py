@@ -10,11 +10,11 @@ from urllib.request import urlopen
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 
-from .settings import Settings
+from .chat_models import API_STYLE_OLLAMA, ChatModelConfig, get_chat_model
 from .grounded_generation import (
     GENERATION_MODE_CURRENT,
     GENERATION_MODE_STRICT,
@@ -24,6 +24,7 @@ from .grounded_generation import (
     REFUSAL_TEXT,
     generate_strict_grounded_answer,
 )
+from .settings import Settings
 
 
 DEFAULT_ANSWER_STYLE = "grounded_concise"
@@ -125,7 +126,7 @@ class DenseRAGResources:
     embeddings: OllamaEmbeddings
     pinecone_client: Pinecone
     pinecone_index: Any
-    llm: ChatOllama
+    llm: Any
 
     @classmethod
     def connect(
@@ -133,16 +134,17 @@ class DenseRAGResources:
         settings: Settings,
         *,
         create_index: bool = False,
+        chat_model_config: ChatModelConfig | None = None,
     ) -> "DenseRAGResources":
         api_key = os.getenv("PINECONE_API_KEY", "").strip()
         if not api_key:
             raise ValueError("PINECONE_API_KEY is required to connect to the Pinecone index.")
 
+        model_config = chat_model_config or settings.chat_model_config()
         available_models = installed_ollama_models(settings.ollama_base_url)
-        required_models = {
-            settings.embedding_model.removesuffix(":latest"),
-            settings.chat_model.removesuffix(":latest"),
-        }
+        required_models = {settings.embedding_model.removesuffix(":latest")}
+        if model_config.api_style == API_STYLE_OLLAMA:
+            required_models.add(model_config.model.removesuffix(":latest"))
         missing_models = required_models - available_models
         if missing_models:
             commands = "\n".join(f"ollama pull {model}" for model in sorted(missing_models))
@@ -200,11 +202,7 @@ class DenseRAGResources:
             raise ValueError(f"The baseline requires cosine similarity, but the index uses '{metric}'.")
 
         pinecone_index = pinecone_client.Index(settings.pinecone_index_name)
-        llm = ChatOllama(
-            model=settings.chat_model,
-            base_url=settings.ollama_base_url,
-            temperature=0,
-        )
+        llm = get_chat_model(model_config)
         return cls(
             embeddings=embeddings,
             pinecone_client=pinecone_client,
