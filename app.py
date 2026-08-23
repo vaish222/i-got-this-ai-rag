@@ -780,7 +780,7 @@ def render_app() -> None:
     st.markdown(
         f"""
         <div class="igt-hero">
-            <h1>✨ I GOT THIS.</h1>
+            <h1>✨ I GOT THIS. What’s next?</h1>
             <h4>24 hours. A hundred things to remember. Let’s make “What’s next?” the easy part.</h4>
             <p>School. Kids. Home. Learning. Volunteering. Social plans. Life. You keep living it. I Got This keeps track of it.</p>
         </div>
