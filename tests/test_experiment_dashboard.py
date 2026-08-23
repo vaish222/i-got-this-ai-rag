@@ -16,6 +16,7 @@ from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     load_current_app_benchmark,
     load_experiment_dashboard,
     load_generation_model_dashboard,
+    load_qwen_generation_comparison,
 )
 
 
@@ -70,6 +71,31 @@ def comparison_payload() -> dict:
 
 
 class ExperimentDashboardTests(unittest.TestCase):
+
+    def test_qwen_generation_comparison_requires_three_complete_metric_rows(self) -> None:
+        metrics = {
+            "recall_at_5": 0.9,
+            "claim_level_faithfulness": 0.97,
+            "answer_relevance_correctness": 0.6,
+            "correct_refusal_rate": 1.0,
+            "average_claims_per_answer": 4.0,
+            "average_output_tokens": 100.0,
+            "average_latency_seconds": 4.0,
+            "p95_latency_seconds": 8.0,
+        }
+        payload = {
+            "experiment_suite": "qwen_concise_relevance_comparison",
+            "versions": [
+                {"experiment_id": mode, "metrics": metrics}
+                for mode in ("E1", "E2", "E3")
+            ],
+        }
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as directory:
+            path = Path(directory) / "comparison.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            loaded = load_qwen_generation_comparison(path)
+
+        self.assertEqual(len(loaded["versions"]), 3)
     def write_payload(self, directory: str, payload: dict) -> Path:
         path = Path(directory) / "comparison.json"
         path.write_text(json.dumps(payload), encoding="utf-8")

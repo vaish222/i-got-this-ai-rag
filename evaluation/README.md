@@ -427,6 +427,45 @@ answer the question is classified as `irrelevant but grounded information`; it r
 supported for faithfulness and is tracked as a relevance problem. The same read-only
 audit is available in the Streamlit RAG Lab.
 
+## Qwen concise-generation experiment
+
+The E1/E2/E3 experiment keeps the corpus, chunking, embeddings, Pinecone index and
+namespace, dense Top-5 retrieval, evaluation questions, Qwen model, and claim-level
+auditor fixed. Retrieval is executed once and reused by all three modes:
+
+- **E1:** current strict prompt with all answer-path evidence;
+- **E2:** concise/relevance prompt, intent-based item limits, all answer-path evidence;
+- **E3:** the E2 prompt plus soft relevance-first evidence selection.
+
+Run all modes, or resume selected modes after a provider failure, with:
+
+```bash
+uv run python evaluation/run_qwen_generation_experiments.py
+uv run python evaluation/run_qwen_generation_experiments.py --modes E1_qwen_current
+```
+
+The latest controlled run measured:
+
+| Mode | Recall@5 | Claim faithfulness | Relevance | Refusal | Unsupported | Claims/answer | Output tokens | Avg latency | P95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| E1 — current strict | 0.900 | 0.962 | 0.599 | 1.000 | 7 | 12.20 | 501.5 | 7.692 s | 36.801 s |
+| E2 — concise prompt | 0.900 | 0.979 | **0.608** | 1.000 | 2 | **6.47** | 307.6 | **3.634 s** | **17.138 s** |
+| E3 — concise + selection | 0.900 | **0.990** | 0.604 | 1.000 | **1** | 6.93 | **285.6** | 4.002 s | 17.803 s |
+
+Provider-reported tokens are averaged over all 15 answers; deterministic application
+answers and pre-generation refusals count as zero-token calls. The per-question trace
+also records input, output, and total tokens plus generation-only latency. Both concise
+modes pass the stated success criteria. E2 has the best measured relevance and latency;
+E3 uses fewer input/output tokens and has the best claim faithfulness, but its additional
+evidence selection did not improve relevance or latency over E2 in this run.
+
+Artifacts are stored separately in `evaluation/results/E1_qwen_current/`,
+`E2_qwen_concise/`, and `E3_qwen_concise_selection/`. The combined JSON and Markdown
+tables are `evaluation/results/qwen_generation_comparison.json` and
+`evaluation/results/qwen_generation_comparison.md`. Every question retains the original
+Top-5 text, the evidence seen by the answer path, selected evidence decisions, generated
+answer, token usage, timing, and unchanged claim audit.
+
 ## Phase boundary
 
 Phase 10 implements final cross-version evaluation. The Streamlit application in `app.py` provides both the simple user interface and a read-only dashboard over these measured results. RAG developer/debug mode, deployment, and all later phases remain intentionally unimplemented.

@@ -1,0 +1,21 @@
+experiment_id: E2_qwen_concise
+label: E2 — Qwen concise/relevance prompt
+provider: nebius
+api_style: openai_compatible
+model_env: NEBIUS_MODEL_1
+model_default: Qwen/Qwen3-30B-A3B-Instruct-2507
+expected_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+base_url_env: NEBIUS_BASE_URL
+base_url_default: https://api.tokenfactory.nebius.com/v1/
+api_key_env: NEBIUS_API_KEY
+timeout_seconds: 60
+max_retries: 0
+max_output_tokens: 1500
+prompt_mode: concise_relevance
+evidence_mode: all
+length_policy:
+  exact_lookup: 3
+  yes_no: 2
+  schedule_lookup: 5
+  cross_domain_summary: 8
+  planning_request: 8

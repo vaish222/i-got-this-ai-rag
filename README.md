@@ -212,6 +212,17 @@ uv run python evaluation/run_claim_faithfulness_audit.py
 The resulting explainable support analysis and evaluator-disagreement flags are also
 shown in the Experiments tab.
 
+To compare the current Qwen strict response against concise and relevance-first
+generation modes while keeping retrieval fixed, run:
+
+```bash
+uv run python evaluation/run_qwen_generation_experiments.py
+```
+
+The Experiments tab displays Recall@5, claim faithfulness, relevance, refusal,
+claims per answer, provider-reported output tokens, and average/P95 latency for E1,
+E2, and E3.
+
 ## Tests
 
 Run the offline test suite with:

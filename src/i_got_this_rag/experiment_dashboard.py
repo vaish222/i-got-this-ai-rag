@@ -469,3 +469,27 @@ def load_claim_faithfulness_audit(path: Path) -> dict[str, Any]:
     if not isinstance(payload.get("conclusion"), dict):
         raise ValueError("Claim audit conclusion is missing.")
     return payload
+
+
+def load_qwen_generation_comparison(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.resolve().read_text(encoding="utf-8"))
+    if payload.get("experiment_suite") != "qwen_concise_relevance_comparison":
+        raise ValueError("Unsupported Qwen generation comparison artifact.")
+    versions = payload.get("versions")
+    if not isinstance(versions, list) or len(versions) != 3:
+        raise ValueError("Qwen comparison must contain E1, E2, and E3.")
+    required_metrics = {
+        "recall_at_5",
+        "claim_level_faithfulness",
+        "answer_relevance_correctness",
+        "correct_refusal_rate",
+        "average_claims_per_answer",
+        "average_output_tokens",
+        "average_latency_seconds",
+        "p95_latency_seconds",
+    }
+    for version in versions:
+        metrics = version.get("metrics")
+        if not isinstance(metrics, dict) or not required_metrics.issubset(metrics):
+            raise ValueError("A Qwen comparison mode is missing required metrics.")
+    return payload

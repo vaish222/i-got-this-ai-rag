@@ -36,6 +36,7 @@ class Settings:
     llm_api_key: str = ""
     llm_base_url: str = "http://localhost:11434"
     llm_timeout_seconds: float = 30.0
+    llm_max_output_tokens: int | None = None
 
     @classmethod
     def from_environment(cls, project_root: Path) -> "Settings":
@@ -80,6 +81,11 @@ class Settings:
             llm_api_key=os.getenv("LLM_API_KEY", ""),
             llm_base_url=os.getenv("LLM_BASE_URL", ollama_base_url).rstrip("/"),
             llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+            llm_max_output_tokens=(
+                int(os.environ["LLM_MAX_OUTPUT_TOKENS"])
+                if os.getenv("LLM_MAX_OUTPUT_TOKENS", "").strip()
+                else None
+            ),
         )
         settings.validate()
         return settings
@@ -121,6 +127,7 @@ class Settings:
             ),
             timeout_seconds=self.llm_timeout_seconds,
             max_retries=0,
+            max_output_tokens=self.llm_max_output_tokens,
         )
 
     def public_config(self) -> dict[str, Any]:

@@ -164,6 +164,10 @@ class GroundedGeneration:
     constraints: QuestionConstraints
     context_source_ids: tuple[str, ...]
     relevance_decisions: tuple[RelevanceDecision, ...]
+    token_usage: dict[str, int] | None = None
+    generation_latency_seconds: float | None = None
+    answer_intent: str | None = None
+    answer_item_limit: int | None = None
 
     def trace(self) -> dict[str, Any]:
         return {
@@ -172,6 +176,10 @@ class GroundedGeneration:
             "relevance_decisions": [item.to_dict() for item in self.relevance_decisions],
             "structured_items": [item.model_dump(mode="json") for item in self.items],
             "optional_suggestions": list(self.optional_suggestions),
+            "token_usage": self.token_usage,
+            "generation_latency_seconds": self.generation_latency_seconds,
+            "answer_intent": self.answer_intent,
+            "answer_item_limit": self.answer_item_limit,
         }
 
 

@@ -37,6 +37,7 @@ class ChatModelConfig:
     api_key_env: str | None = None
     timeout_seconds: float = 30.0
     max_retries: int = 0
+    max_output_tokens: int | None = None
 
     def validate(self) -> None:
         if not self.provider.strip():
@@ -62,6 +63,10 @@ class ChatModelConfig:
             raise ChatModelConfigurationError("LLM timeout must be positive.")
         if self.max_retries < 0:
             raise ChatModelConfigurationError("LLM max retries cannot be negative.")
+        if self.max_output_tokens is not None and self.max_output_tokens <= 0:
+            raise ChatModelConfigurationError(
+                "LLM max output tokens must be positive when configured."
+            )
 
     def public_config(self) -> dict[str, Any]:
         return {
@@ -73,6 +78,7 @@ class ChatModelConfig:
             "api_key_configured": bool(self.api_key.strip()),
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
+            "max_output_tokens": self.max_output_tokens,
         }
 
 
@@ -80,11 +86,18 @@ def get_chat_model(config: ChatModelConfig) -> ChatModelLike:
     """Create a LangChain chat model without exposing provider details to RAG code."""
     config.validate()
     if config.api_style == API_STYLE_OLLAMA:
+        options: dict[str, Any] = {}
+        if config.max_output_tokens is not None:
+            options["num_predict"] = config.max_output_tokens
         return ChatOllama(
             model=config.model,
             base_url=config.base_url.rstrip("/"),
             temperature=0,
+            **options,
         )
+    options = {}
+    if config.max_output_tokens is not None:
+        options["max_tokens"] = config.max_output_tokens
     return ChatOpenAI(
         model=config.model,
         api_key=config.api_key,
@@ -92,4 +105,5 @@ def get_chat_model(config: ChatModelConfig) -> ChatModelLike:
         temperature=0,
         timeout=config.timeout_seconds,
         max_retries=config.max_retries,
+        **options,
     )

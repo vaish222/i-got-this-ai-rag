@@ -26,6 +26,7 @@ class GenerationModelExperiment:
     api_key_env: str | None
     timeout_seconds: float
     max_retries: int
+    max_output_tokens: int | None
     config_path: Path
     config_sha256: str
 
@@ -39,6 +40,7 @@ class GenerationModelExperiment:
             api_key_env=self.api_key_env,
             timeout_seconds=self.timeout_seconds,
             max_retries=self.max_retries,
+            max_output_tokens=self.max_output_tokens,
         )
 
     def public_config(self, project_root: Path) -> dict[str, Any]:
@@ -55,6 +57,7 @@ class GenerationModelExperiment:
             "api_key_configured": bool(self.api_key.strip()),
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
+            "max_output_tokens": self.max_output_tokens,
             "config_path": self.config_path.relative_to(project_root).as_posix(),
             "config_sha256": self.config_sha256,
         }
@@ -111,6 +114,11 @@ def load_generation_model_experiments(
                 api_key_env=api_key_env,
                 timeout_seconds=float(payload.get("timeout_seconds", 30)),
                 max_retries=int(payload.get("max_retries", 0)),
+                max_output_tokens=(
+                    int(payload["max_output_tokens"])
+                    if payload.get("max_output_tokens") is not None
+                    else None
+                ),
                 config_path=path.resolve(),
                 config_sha256=hashlib.sha256(raw).hexdigest(),
             )

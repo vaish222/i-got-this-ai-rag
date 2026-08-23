@@ -29,6 +29,7 @@ from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     load_current_app_benchmark,
     load_experiment_dashboard,
     load_generation_model_dashboard,
+    load_qwen_generation_comparison,
 )
 from i_got_this_rag.settings import Settings  # noqa: E402
 from i_got_this_rag.user_interface import (  # noqa: E402
@@ -61,6 +62,9 @@ CLAIM_FAITHFULNESS_AUDIT_PATH = (
     / "results"
     / "claim_faithfulness_audit"
     / "results.json"
+)
+QWEN_GENERATION_COMPARISON_PATH = (
+    PROJECT_ROOT / "evaluation" / "results" / "qwen_generation_comparison.json"
 )
 SUGGESTED_QUESTIONS = (
     ("⏭️", "What's coming up this week?"),
@@ -478,6 +482,12 @@ def load_claim_audit_results(path: str, modified_at_ns: int) -> dict:
     return load_claim_faithfulness_audit(Path(path))
 
 
+@st.cache_data(show_spinner=False)
+def load_qwen_generation_results(path: str, modified_at_ns: int) -> dict:
+    del modified_at_ns
+    return load_qwen_generation_comparison(Path(path))
+
+
 def render_generation_model_comparison() -> None:
     st.divider()
     st.subheader("Generation model comparison")
@@ -664,6 +674,74 @@ def render_claim_faithfulness_audit() -> None:
     st.caption(f"Claim audit completed: {audit['completed_at']}")
 
 
+def render_qwen_generation_comparison() -> None:
+    st.divider()
+    st.subheader("Qwen concise-generation comparison")
+    st.caption(
+        "E1/E2/E3 use the same Qwen model, 15 questions, and immutable Top-5 "
+        "retrieval cache. Only answer directness, length policy, and E3 evidence "
+        "selection vary."
+    )
+    if not QWEN_GENERATION_COMPARISON_PATH.is_file():
+        st.info(
+            "No Qwen concise-generation comparison is available yet. Run "
+            "`uv run python evaluation/run_qwen_generation_experiments.py`."
+        )
+        return
+    try:
+        comparison = load_qwen_generation_results(
+            QWEN_GENERATION_COMPARISON_PATH.as_posix(),
+            QWEN_GENERATION_COMPARISON_PATH.stat().st_mtime_ns,
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.error(f"The Qwen generation comparison could not be loaded: {exc}")
+        return
+
+    st.dataframe(
+        [
+            {
+                "Mode": version["label"],
+                "Recall@5": version["metrics"]["recall_at_5"],
+                "Claim faithfulness": version["metrics"]["claim_level_faithfulness"],
+                "Relevance": version["metrics"]["answer_relevance_correctness"],
+                "Refusal": version["metrics"]["correct_refusal_rate"],
+                "Unsupported": version["metrics"]["unsupported_claims"],
+                "Claims / answer": version["metrics"]["average_claims_per_answer"],
+                "Output tokens": version["metrics"]["average_output_tokens"],
+                "Avg. latency (s)": version["metrics"]["average_latency_seconds"],
+                "P95 latency (s)": version["metrics"]["p95_latency_seconds"],
+                "Success": "Yes" if version["meets_success_criteria"] else "No",
+            }
+            for version in comparison["versions"]
+        ],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Recall@5": st.column_config.NumberColumn(format="%.3f"),
+            "Claim faithfulness": st.column_config.NumberColumn(format="%.3f"),
+            "Relevance": st.column_config.NumberColumn(format="%.3f"),
+            "Refusal": st.column_config.NumberColumn(format="%.3f"),
+            "Claims / answer": st.column_config.NumberColumn(format="%.3f"),
+            "Output tokens": st.column_config.NumberColumn(format="%.1f"),
+            "Avg. latency (s)": st.column_config.NumberColumn(format="%.3f"),
+            "P95 latency (s)": st.column_config.NumberColumn(format="%.3f"),
+        },
+    )
+    successful = [
+        version["label"]
+        for version in comparison["versions"]
+        if version["meets_success_criteria"]
+    ]
+    if successful:
+        st.success("All success criteria met: " + ", ".join(successful))
+    else:
+        st.warning(
+            "No mode met every target simultaneously. Inspect the per-mode results "
+            "before choosing a generation policy."
+        )
+    st.caption(f"Qwen comparison completed: {comparison['completed_at']}")
+
+
 def render_experiment_dashboard() -> None:
     st.header("Experiment Dashboard")
     st.caption(
@@ -748,6 +826,7 @@ def render_experiment_dashboard() -> None:
 
     render_generation_model_comparison()
     render_claim_faithfulness_audit()
+    render_qwen_generation_comparison()
 
     st.divider()
     st.subheader("Current app end-to-end")
