@@ -49,7 +49,7 @@ Phase 9 wraps the selected retrieval and generation components in a LangGraph `S
 
 Phase 10 compares all eight PRD system versions on the same 15-question dataset. It reuses the recorded results for six versions, runs the two missing end-to-end combinations, adds deterministic claim-level faithfulness and refusal scoring, measures average and p95 latency, and records per-question gains, losses, costs, and a recommendation.
 
-The Streamlit application provides the PRD's focused question-and-answer experience plus a read-only experiment dashboard. The Ask tab uses the selected dense pipeline and displays grounded answers with resolved source citations. The Experiments tab compares the eight measured Phase 10 versions and explains what changed, what stayed constant, gains, regressions, latency cost, and whether the result justified the change.
+The Streamlit application provides a colorful, personalized chat experience plus a read-only experiment dashboard. The Ask tab uses the selected dense pipeline, displays grounded answers with resolved source citations, and keeps the latest three exchanges in session so follow-up questions can resolve references such as “that event.” The Experiments tab compares the eight measured Phase 10 versions and explains what changed, what stayed constant, gains, regressions, latency cost, and whether the result justified the change.
 
 No other post-Phase-10 work is included. The RAG developer/debug mode, deployment, and later phases remain unimplemented.
 
@@ -96,7 +96,13 @@ uv sync
 uv run streamlit run app.py
 ```
 
-The Ask tab reads the same typed settings and `.env` file as the Python runners. It connects only after a non-empty question is submitted and caches the read-only RAG connection for subsequent questions. If the small local model omits citations, the existing deterministic citation attributor adds a source label only when the claim's concrete facts and informative terms match retrieved evidence; unsupported claims never receive a fabricated citation. The interface then displays only sources actually cited in the answer. Connection and configuration failures are shown in the page instead of crashing it.
+Set `APP_USER_NAME` in `.env` to personalize the greeting; leave it empty for the neutral “Hi, there!” greeting. The Ask tab reads the same typed settings and `.env` file as the Python runners. It connects only after a question is submitted and caches the read-only RAG connection for subsequent questions. Four starter prompts make common family-planning questions one click away.
+
+The latest three question-and-answer exchanges are kept only in Streamlit session state. On later turns, the local generation model rewrites the new message into a standalone retrieval question. The guard removes newly invented dates, times, and IDs and restores protected terms from the user's current message before retrieval. Starting a new conversation or ending the Streamlit session clears this memory. Follow-up turns therefore make one additional local model call and may be slightly slower than the first turn.
+
+The Streamlit app opts into a plain-language answer style: answers begin directly, use practical bullets or day-by-day sections when useful, and deterministically render anonymous role IDs as readable descriptions without inventing names. Pending-RSVP questions use an additional evidence gate: only invitation sections explicitly marked `RSVP: pending` are displayed, so unrelated open action items cannot be presented as invitations. These presentation safeguards are UI-only; evaluation runners retain the original concise prompt so recorded phase comparisons remain reproducible. Inline `[S1]` labels continue to connect factual statements to the resolved documents in the Sources expander.
+
+If the small local model omits citations, the existing deterministic citation attributor adds a source label only when the claim's concrete facts and informative terms match retrieved evidence; unsupported claims never receive a fabricated citation. The interface then displays only sources actually cited in the answer. Connection and configuration failures are shown in the page instead of crashing it.
 
 The Experiments tab reads `evaluation/results/phase10_final/comparison.json`; it never launches or reruns experiments. If that artifact is unavailable, the page provides the Phase 10 runner command needed to generate it. The dashboard includes the measured configuration matrix, Recall@5, strict faithfulness, average latency, the selected recommendation, and a per-experiment PRD trade-off analysis.
 
@@ -397,7 +403,7 @@ PYTHONPATH=src uv run python -m unittest discover -s tests -v
 ## Repository layout
 
 ```text
-app.py                      # simple Streamlit question-and-answer interface
+app.py                      # personalized Streamlit chat and experiment dashboard
 
 data/
 ├── README.md
@@ -473,6 +479,7 @@ notebooks/
 
 src/i_got_this_rag/
 ├── baseline.py              # read-only connection to the Phase 1 pipeline
+├── conversation.py          # guarded, session-aware follow-up query rewriting
 ├── chunk_experiments.py     # experiment config and guarded namespace indexing
 ├── embedding_experiments.py # dimension-safe model/index experiments
 ├── evaluation.py            # metrics, result schema, and persistence
@@ -493,6 +500,7 @@ src/i_got_this_rag/
 └── settings.py              # typed environment configuration
 
 tests/
+├── test_conversation.py
 ├── test_phase_notebooks.py
 ├── test_phase1_runner.py
 ├── test_phase2_evaluation.py

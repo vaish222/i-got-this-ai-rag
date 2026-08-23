@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Sequence
 
 from langchain_core.documents import Document
 from streamlit.testing.v1 import AppTest
@@ -11,8 +14,22 @@ from streamlit.testing.v1 import AppTest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from i_got_this_rag.baseline import REFUSAL_TEXT  # noqa: E402
-from i_got_this_rag.user_interface import answer_question, normalize_question  # noqa: E402
+from i_got_this_rag.baseline import (  # noqa: E402
+    DEFAULT_ANSWER_STYLE,
+    PLAIN_LANGUAGE_ANSWER_STYLE,
+    REFUSAL_TEXT,
+    generate_grounded_answer,
+)
+from i_got_this_rag.conversation import (  # noqa: E402
+    ConversationRewrite,
+    ConversationTurn,
+)
+from i_got_this_rag.user_interface import (  # noqa: E402
+    answer_question,
+    format_answer_for_display,
+    humanize_anonymous_identifiers,
+    normalize_question,
+)
 
 
 class FakePipeline:
@@ -60,23 +77,282 @@ class FakePipeline:
         return self.answer
 
 
+class FakeRewriter:
+    def __init__(self, retrieval_question: str) -> None:
+        self.retrieval_question = retrieval_question
+        self.calls: list[tuple[str, tuple[ConversationTurn, ...]]] = []
+
+    def rewrite(
+        self,
+        question: str,
+        history: Sequence[ConversationTurn],
+    ) -> ConversationRewrite:
+        self.calls.append((question, tuple(history)))
+        return ConversationRewrite(
+            original_question=question,
+            retrieval_question=self.retrieval_question,
+            used_history=True,
+            raw_output=self.retrieval_question,
+            guard_repairs=(),
+        )
+
+
+class PromptCapturingLLM:
+    def __init__(self, answer: str = "A plain answer [S1].") -> None:
+        self.answer = answer
+        self.prompt: object | None = None
+
+    def invoke(self, prompt: object) -> SimpleNamespace:
+        self.prompt = prompt
+        return SimpleNamespace(content=self.answer)
+
+
 class StreamlitUserInterfaceTests(unittest.TestCase):
-    def test_streamlit_app_renders_prd_v1_controls_without_connecting(self) -> None:
+    def test_plain_language_style_is_ui_specific_and_preserves_default(self) -> None:
+        settings = SimpleNamespace(
+            reference_date="2026-08-20",
+            timezone="America/Los_Angeles",
+        )
+        results = [
+            (
+                Document(
+                    page_content="friend_child_01 has a birthday on August 22.",
+                    metadata={
+                        "document_title": "Birthday Calendar",
+                        "chunk_id": "birthday_001::chunk_000",
+                        "source_path": "data/sample/family/birthdays.md",
+                    },
+                ),
+                0.9,
+            )
+        ]
+        plain_llm = PromptCapturingLLM()
+        default_llm = PromptCapturingLLM()
+
+        generate_grounded_answer(
+            settings,
+            plain_llm,
+            "Which birthdays still need gifts?",
+            results,
+            answer_style=PLAIN_LANGUAGE_ANSWER_STYLE,
+        )
+        generate_grounded_answer(
+            settings,
+            default_llm,
+            "Which birthdays still need gifts?",
+            results,
+            answer_style=DEFAULT_ANSWER_STYLE,
+        )
+
+        plain_prompt = plain_llm.prompt.to_messages()[0].content  # type: ignore[union-attr]
+        default_prompt = default_llm.prompt.to_messages()[0].content  # type: ignore[union-attr]
+        self.assertIn("plain, everyday language", plain_prompt)
+        self.assertIn("Never mention provided data", plain_prompt)
+        self.assertIn("friend_child_01", plain_prompt)
+        self.assertNotIn("plain, everyday language", default_prompt)
+
+    def test_unknown_answer_style_is_rejected_before_model_call(self) -> None:
+        llm = PromptCapturingLLM()
+
+        with self.assertRaisesRegex(ValueError, "Unsupported answer style"):
+            generate_grounded_answer(
+                SimpleNamespace(reference_date="2026-08-20", timezone="UTC"),
+                llm,
+                "Question",
+                [],
+                answer_style="unknown",
+            )
+
+        self.assertIsNone(llm.prompt)
+
+    def test_display_formatter_removes_data_preamble_and_humanizes_ids(self) -> None:
+        answer = (
+            "According to the data, the following items need attention:\n\n"
+            "- `friend_family_02` dinner [S1]\n"
+            "- `child_01` and `child_02` picture days [S2]"
+        )
+
+        formatted = format_answer_for_display(answer)
+
+        self.assertTrue(formatted.startswith("The following items need attention:"))
+        self.assertIn("your friends dinner [S1]", formatted)
+        self.assertIn("your middle-school child", formatted)
+        self.assertIn("your elementary-school child", formatted)
+        self.assertNotIn("_0", formatted)
+        self.assertNotIn("According to the data", formatted)
+
+    def test_unknown_anonymous_id_is_still_rendered_as_a_readable_role(self) -> None:
+        formatted = humanize_anonymous_identifiers(
+            "Ask `neighbor_group_03` and `coordinator_04`."
+        )
+
+        self.assertEqual(formatted, "Ask your neighbors 3 and the coordinator 4.")
+
+    def test_pending_rsvp_answer_excludes_unrelated_action_items(self) -> None:
+        pipeline = FakePipeline(
+            "According to the data, `friend_family_02`, `child_01`, and "
+            "`child_02` need responses [S1][S2]."
+        )
+        pipeline.results = [
+            (
+                Document(
+                    page_content="""# August Invitations and RSVP Tracker
+
+## Neighborhood potluck
+
+- Event: Sunday, August 23, **5:00–7:00 PM**
+- RSVP: **pending**
+- RSVP deadline: **Friday, August 21 at noon**
+
+## `friend_family_02` dinner
+
+- Event: Saturday, August 29, 6:00 PM
+- RSVP: **pending**
+- RSVP deadline: Monday, August 24
+- Note: ask whether children are included before accepting
+
+## `friend_child_01` birthday party
+
+- Event: Saturday, August 22, 3:00–5:00 PM
+- RSVP: **completed**
+""",
+                    metadata={
+                        "document_id": "social_001",
+                        "document_title": "August Invitations and RSVP Tracker",
+                        "chunk_id": "social_001::chunk_000",
+                        "source_path": "data/sample/social/invitations.md",
+                    },
+                ),
+                0.95,
+            ),
+            (
+                Document(
+                    page_content="""# School Events
+
+## Picture days
+
+- `child_02` elementary picture day: outfit not selected
+- `child_01` middle school picture day: no action yet
+""",
+                    metadata={
+                        "document_id": "school_004",
+                        "document_title": "School Events and Forms Tracker",
+                        "chunk_id": "school_004::chunk_000",
+                        "source_path": "data/sample/school/school_events.md",
+                    },
+                ),
+                0.82,
+            ),
+        ]
+
+        response = answer_question(
+            pipeline,
+            "Which invitations still need an RSVP?",
+        )
+
+        self.assertIn("2 invitations still need a response", response.answer)
+        self.assertIn("Neighborhood potluck", response.answer)
+        self.assertIn("Dinner with your friends", response.answer)
+        self.assertIn("Friday, August 21 at noon", response.answer)
+        self.assertIn("Monday, August 24", response.answer)
+        self.assertNotIn("picture day", response.answer.casefold())
+        self.assertNotIn("friend_family_02", response.answer)
+        self.assertEqual(pipeline.questions, [response.question])
+        self.assertEqual(
+            [source.title for source in response.sources],
+            ["August Invitations and RSVP Tracker"],
+        )
+
+    def test_pending_rsvp_question_refuses_without_explicit_pending_evidence(self) -> None:
+        pipeline = FakePipeline("The picture days need responses [S1].")
+        pipeline.results = [
+            (
+                Document(
+                    page_content="Picture day outfit is not selected.",
+                    metadata={
+                        "document_id": "school_004",
+                        "document_title": "School Events",
+                        "chunk_id": "school_004::chunk_000",
+                        "source_path": "data/sample/school/school_events.md",
+                    },
+                ),
+                0.8,
+            )
+        ]
+
+        response = answer_question(
+            pipeline,
+            "Which invitations still require an RSVP?",
+        )
+
+        self.assertEqual(response.answer, REFUSAL_TEXT)
+        self.assertEqual(response.sources, ())
+        self.assertEqual(pipeline.questions, [response.question])
+
+    def test_completed_rsvp_question_keeps_the_normal_generation_path(self) -> None:
+        pipeline = FakePipeline("The birthday-party RSVP is completed [S1].")
+
+        response = answer_question(pipeline, "Which RSVPs are completed?")
+
+        self.assertEqual(response.answer, "The birthday-party RSVP is completed [S1].")
+        self.assertEqual(pipeline.questions, [response.question, response.question])
+
+    def test_streamlit_theme_forces_readable_beans_colors(self) -> None:
+        with (PROJECT_ROOT / ".streamlit" / "config.toml").open("rb") as config_file:
+            theme = tomllib.load(config_file)["theme"]
+
+        self.assertEqual(theme["base"], "light")
+        self.assertEqual(theme["primaryColor"], "#1C2042")
+        self.assertEqual(theme["backgroundColor"], "#FCFBFA")
+        self.assertEqual(theme["secondaryBackgroundColor"], "#CBDBF2")
+        self.assertEqual(theme["textColor"], "#1C2042")
+
+    def test_streamlit_app_renders_personalized_chat_without_connecting(self) -> None:
         app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
 
         self.assertEqual(app.exception, [])
-        self.assertEqual(app.title[0].value, "I GOT THIS")
-        self.assertEqual(len(app.text_input), 1)
-        self.assertEqual(
-            app.text_input[0].placeholder,
-            "What should I prepare for this week?",
+        style = app.markdown[0].value.lower()
+        for color in (
+            "#1c2042",
+            "#ffed8e",
+            "#ffea8a",
+            "#efd6db",
+            "#cbdbf2",
+            "#badbe5",
+            "#fcfbfa",
+        ):
+            self.assertIn(color, style)
+        self.assertIn("::selection", style)
+        self.assertIn("::-moz-selection", style)
+        self.assertIn('[data-baseweb="tab"] *', style)
+        self.assertIn('[data-testid="stchatinput"] textarea', style)
+        self.assertTrue(
+            any(
+                "<h1>Hi," in item.value and "What’s next?</h1>" in item.value
+                for item in app.markdown
+            )
         )
-        self.assertEqual(len(app.button), 1)
-        self.assertEqual(app.button[0].label, "Ask")
+        self.assertEqual(len(app.chat_message), 1)
+        self.assertIn(
+            "I can help connect schedules",
+            app.chat_message[0].markdown[0].value,
+        )
+        self.assertEqual(len(app.chat_input), 1)
+        self.assertEqual(
+            app.chat_input[0].placeholder,
+            "Ask what's next, what to prepare, or what you might be forgetting…",
+        )
+        self.assertEqual(
+            {button.label for button in app.button},
+            {
+                "↻ New conversation",
+                "📅 What's coming up this week?",
+                "💌 Which invitations still need an RSVP?",
+                "🎒 What should I prepare for this weekend?",
+                "🎁 Which birthdays still need gifts?",
+            },
+        )
         self.assertEqual([tab.label for tab in app.tabs], ["Ask", "Experiments"])
-
-        app.button[0].click().run(timeout=20)
-        self.assertEqual(app.warning[0].value, "Enter a question before selecting Ask.")
 
     def test_empty_question_is_rejected_without_calling_pipeline(self) -> None:
         with self.assertRaisesRegex(ValueError, "Enter a question"):
@@ -93,6 +369,8 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         )
 
         self.assertEqual(response.question, "What should I prepare this week?")
+        self.assertEqual(response.retrieval_question, response.question)
+        self.assertFalse(response.used_conversation_context)
         self.assertEqual(pipeline.questions, [response.question, response.question])
         self.assertEqual(
             [source.title for source in response.sources],
@@ -137,6 +415,43 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
 
         self.assertEqual(response.answer, REFUSAL_TEXT)
         self.assertEqual(response.sources, ())
+
+    def test_follow_up_is_rewritten_before_retrieval_and_generation(self) -> None:
+        pipeline = FakePipeline("Bring a side dish [S1].")
+        history = (
+            ConversationTurn(
+                user_question="When is the neighborhood potluck?",
+                assistant_answer="It is Sunday at 5 PM.",
+            ),
+        )
+        rewriter = FakeRewriter(
+            "What should we bring to the neighborhood potluck on Sunday at 5 PM?"
+        )
+
+        response = answer_question(
+            pipeline,
+            "What should we bring?",
+            history=history,
+            rewriter=rewriter,
+        )
+
+        self.assertEqual(response.question, "What should we bring?")
+        self.assertEqual(response.retrieval_question, rewriter.retrieval_question)
+        self.assertTrue(response.used_conversation_context)
+        self.assertEqual(rewriter.calls, [(response.question, history)])
+        self.assertEqual(
+            pipeline.questions,
+            [rewriter.retrieval_question, rewriter.retrieval_question],
+        )
+
+    def test_follow_up_history_requires_a_rewriter(self) -> None:
+        pipeline = FakePipeline("unused")
+        history = (ConversationTurn("What is due?", "The form is due Friday."),)
+
+        with self.assertRaisesRegex(ValueError, "requires a follow-up query rewriter"):
+            answer_question(pipeline, "What about that?", history=history)
+
+        self.assertEqual(pipeline.questions, [])
 
 
 if __name__ == "__main__":
