@@ -14,6 +14,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
     ConversationTurn,
     format_conversation_history,
     recent_turns,
+    requires_conversation_context,
 )
 
 
@@ -60,6 +61,37 @@ class ConversationTests(unittest.TestCase):
         self.assertFalse(result.used_history)
         self.assertEqual(llm.prompts, [])
 
+    def test_standalone_topic_switch_bypasses_history_and_model(self) -> None:
+        llm = FakeLLM("Which birthdays still need gifts?")
+        rewriter = ConversationQueryRewriter(llm, "2026-08-20", "America/Los_Angeles")
+        history = (
+            ConversationTurn(
+                "Which birthdays still need gifts?",
+                "Your friend's child still needs a gift.",
+            ),
+        )
+
+        result = rewriter.rewrite("When is my next volunteer work planned?", history)
+
+        self.assertEqual(
+            result.retrieval_question,
+            "When is my next volunteer work planned?",
+        )
+        self.assertFalse(result.used_history)
+        self.assertEqual(result.guard_repairs, ())
+        self.assertEqual(llm.prompts, [])
+
+    def test_only_context_dependent_questions_are_rewritten(self) -> None:
+        self.assertTrue(requires_conversation_context("When is it?"))
+        self.assertTrue(requires_conversation_context("What should we bring?"))
+        self.assertTrue(requires_conversation_context("What about that event?"))
+        self.assertFalse(
+            requires_conversation_context("When is my next volunteer work planned?")
+        )
+        self.assertFalse(
+            requires_conversation_context("What should I prepare for this weekend?")
+        )
+
     def test_history_can_resolve_a_follow_up_reference(self) -> None:
         llm = FakeLLM(
             "What should we bring to the neighborhood potluck on August 23 at 5 PM?"
@@ -98,18 +130,41 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("7 PM", result.retrieval_question)
         self.assertEqual(result.guard_repairs[0]["reason"], "invented_fact_terms")
 
-    def test_current_question_protected_terms_are_restored(self) -> None:
+    def test_missing_current_question_terms_fall_back_to_original(self) -> None:
         llm = FakeLLM("What needs to be prepared for the event?")
         rewriter = ConversationQueryRewriter(llm, "2025-08-21", "America/Los_Angeles")
         history = (ConversationTurn("What is upcoming?", "A field trip is upcoming."),)
 
         result = rewriter.rewrite("What about child_01 on Friday?", history)
 
-        self.assertIn("child_01", result.retrieval_question)
-        self.assertIn("Friday", result.retrieval_question)
+        self.assertEqual(result.retrieval_question, "What about child_01 on Friday?")
+        self.assertFalse(result.used_history)
         self.assertEqual(
             result.guard_repairs[0]["reason"],
-            "missing_current_question_terms",
+            "missing_current_question_terms_fallback",
+        )
+        self.assertEqual(result.guard_repairs[0]["missing_terms"], ["child_01", "Friday"])
+
+    def test_conflicting_follow_up_topic_falls_back_to_original(self) -> None:
+        llm = FakeLLM("Which birthdays still need gifts?")
+        rewriter = ConversationQueryRewriter(llm, "2026-08-20", "America/Los_Angeles")
+        history = (
+            ConversationTurn(
+                "Which birthdays still need gifts?",
+                "Your friend's child still needs a gift.",
+            ),
+        )
+
+        result = rewriter.rewrite("What about that volunteer work?", history)
+
+        self.assertEqual(result.retrieval_question, "What about that volunteer work?")
+        self.assertFalse(result.used_history)
+        self.assertEqual(
+            result.guard_repairs[-1],
+            {
+                "reason": "missing_current_question_terms_fallback",
+                "missing_terms": ["volunteer"],
+            },
         )
 
     def test_empty_model_output_falls_back_to_the_original_question(self) -> None:

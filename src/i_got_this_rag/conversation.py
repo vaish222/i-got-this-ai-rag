@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -14,9 +15,24 @@ from .query_transformation import (
 )
 
 
-CONVERSATION_REWRITE_VERSION = "streamlit-conversation-v1"
+CONVERSATION_REWRITE_VERSION = "streamlit-conversation-v2"
 DEFAULT_MEMORY_EXCHANGES = 3
 MAX_MESSAGE_CHARACTERS = 1500
+FOLLOW_UP_REFERENCE_PATTERNS = (
+    re.compile(r"\b(?:it|they|them|their|there|that|those|these)\b", re.IGNORECASE),
+    re.compile(
+        r"\bthis\s+(?:one|event|item|date|time|place|person|invitation|"
+        r"birthday|commitment|activity|session)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*(?:and|also|what about|how about)\b", re.IGNORECASE),
+    re.compile(
+        r"^\s*what\s+(?:else\s+)?(?:should|do|can|could)\s+(?:i|we)\s+"
+        r"(?:bring|prepare|pack|buy|send|do)\s*\??\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*(?:what|where|when|which one|what time)\s*\??\s*$", re.IGNORECASE),
+)
 
 CONVERSATION_REWRITE_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -71,6 +87,10 @@ def format_conversation_history(history: Sequence[ConversationTurn]) -> str:
     return "\n\n".join(blocks) or "No previous conversation."
 
 
+def requires_conversation_context(question: str) -> bool:
+    return any(pattern.search(question) for pattern in FOLLOW_UP_REFERENCE_PATTERNS)
+
+
 class ConversationQueryRewriter:
     def __init__(
         self,
@@ -92,7 +112,7 @@ class ConversationQueryRewriter:
         history: Sequence[ConversationTurn],
     ) -> ConversationRewrite:
         selected_history = recent_turns(history, self.memory_exchanges)
-        if not selected_history:
+        if not selected_history or not requires_conversation_context(question):
             return ConversationRewrite(
                 original_question=question,
                 retrieval_question=question,
@@ -126,20 +146,32 @@ class ConversationQueryRewriter:
                 }
             )
 
+        if not rewritten:
+            repairs.append({"reason": "empty_model_output_fallback"})
+            return ConversationRewrite(
+                original_question=question,
+                retrieval_question=question,
+                used_history=False,
+                raw_output=raw_output,
+                guard_repairs=tuple(repairs),
+            )
+
         protected_terms = extract_protected_terms(question)
         missing = missing_protected_terms(rewritten, protected_terms)
         if missing:
-            rewritten = f"{rewritten} {' '.join(missing)}".strip()
             repairs.append(
                 {
-                    "reason": "missing_current_question_terms",
-                    "restored_terms": list(missing),
+                    "reason": "missing_current_question_terms_fallback",
+                    "missing_terms": list(missing),
                 }
             )
-
-        if not rewritten:
-            rewritten = question
-            repairs.append({"reason": "empty_model_output_fallback"})
+            return ConversationRewrite(
+                original_question=question,
+                retrieval_question=question,
+                used_history=False,
+                raw_output=raw_output,
+                guard_repairs=tuple(repairs),
+            )
 
         return ConversationRewrite(
             original_question=question,

@@ -21,6 +21,7 @@ from i_got_this_rag.baseline import (  # noqa: E402
     generate_grounded_answer,
 )
 from i_got_this_rag.conversation import (  # noqa: E402
+    ConversationQueryRewriter,
     ConversationRewrite,
     ConversationTurn,
 )
@@ -556,6 +557,34 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             pipeline.questions,
             [rewriter.retrieval_question, rewriter.retrieval_question],
         )
+
+    def test_standalone_topic_switch_uses_current_question_end_to_end(self) -> None:
+        pipeline = FakePipeline("The volunteer session is Saturday [S1].")
+        llm = PromptCapturingLLM("Which birthdays still need gifts?")
+        history = (
+            ConversationTurn(
+                user_question="Which birthdays still need gifts?",
+                assistant_answer="Your friend's child still needs a gift.",
+            ),
+        )
+        rewriter = ConversationQueryRewriter(
+            llm=llm,
+            reference_date="2026-08-20",
+            timezone="America/Los_Angeles",
+        )
+
+        response = answer_question(
+            pipeline,
+            "When is my next volunteer work planned?",
+            history=history,
+            rewriter=rewriter,
+        )
+
+        self.assertEqual(response.question, "When is my next volunteer work planned?")
+        self.assertEqual(response.retrieval_question, response.question)
+        self.assertFalse(response.used_conversation_context)
+        self.assertIsNone(llm.prompt)
+        self.assertEqual(pipeline.questions, [response.question, response.question])
 
     def test_follow_up_history_requires_a_rewriter(self) -> None:
         pipeline = FakePipeline("unused")
