@@ -156,7 +156,17 @@ SOURCE_CATEGORY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CITATION_LABEL_PATTERN = re.compile(r"\[(S\d+)\]", re.IGNORECASE)
+DISPLAY_CITATION_PATTERN = re.compile(r"(?:\s*\[S\d+\])+", re.IGNORECASE)
 LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+] |\d+[.)] )")
+DATE_HEADING_PATTERN = re.compile(
+    r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    r"\s*(?:[-–—,]\s*)?"
+    r"(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|"
+    r"Nov|Dec)\s+"
+    r"\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?:?",
+    re.IGNORECASE,
+)
 
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
@@ -180,11 +190,11 @@ def render_sources(response: AnswerView) -> None:
         return
 
     with st.expander(f"📚 Sources ({len(response.sources)})"):
-        for source in response.sources:
+        for source_index, source in enumerate(response.sources, start=1):
             location = source.source_path
             if source.page_number is not None:
                 location = f"{location} · page {source.page_number}"
-            st.markdown(f"**[{source.label}] {source.title}**")
+            st.markdown(f"**Source {source_index}: {source.title}**")
             st.caption(location)
 
 
@@ -226,6 +236,19 @@ def _split_answer_blocks(answer: str) -> tuple[str, ...]:
     return tuple(block for block in blocks if block)
 
 
+def _display_answer_text(text: str) -> str:
+    without_citations = DISPLAY_CITATION_PATTERN.sub("", text)
+    cleaned_lines = (line.rstrip() for line in without_citations.splitlines())
+    return "\n".join(cleaned_lines).strip()
+
+
+def _is_date_heading(text: str) -> bool:
+    visible = _display_answer_text(text).strip()
+    visible = re.sub(r"^#{1,6}\s+", "", visible)
+    visible = visible.strip("*_ ")
+    return "\n" not in visible and bool(DATE_HEADING_PATTERN.fullmatch(visible))
+
+
 def categorized_answer_blocks(
     response: AnswerView,
 ) -> tuple[tuple[str | None, str], ...]:
@@ -235,8 +258,19 @@ def categorized_answer_blocks(
         if (category := _source_category(source.source_path)) is not None
     }
     categorized: list[tuple[str | None, str]] = []
+    active_category: str | None = None
     for text in _split_answer_blocks(response.answer):
-        category = _answer_block_category(text, source_categories)
+        explicit_category = _answer_block_category(text, source_categories)
+        if _is_date_heading(text):
+            active_category = explicit_category
+            category = None
+        elif explicit_category is not None:
+            active_category = explicit_category
+            category = explicit_category
+        elif LIST_ITEM_PATTERN.match(text):
+            category = active_category
+        else:
+            category = None
         if categorized and category is not None and categorized[-1][0] == category:
             previous_category, previous_text = categorized[-1]
             categorized[-1] = (previous_category, f"{previous_text}\n{text}")
@@ -248,18 +282,21 @@ def categorized_answer_blocks(
 def render_answer_content(response: AnswerView, response_index: int) -> None:
     blocks = categorized_answer_blocks(response)
     if not any(category for category, _ in blocks):
-        st.markdown(response.answer)
+        st.markdown(_display_answer_text(response.answer))
         return
 
     for block_index, (category, text) in enumerate(blocks):
+        visible_text = _display_answer_text(text)
+        if not visible_text:
+            continue
         if category is None:
-            st.markdown(text)
+            st.markdown(visible_text)
             continue
         with st.container(
             key=f"answer_category_{category}_{response_index}_{block_index}",
         ):
             st.markdown(f"**{ANSWER_CATEGORY_LABELS[category]}**")
-            st.markdown(text)
+            st.markdown(visible_text)
 
 
 @st.cache_data(show_spinner=False)
@@ -745,7 +782,7 @@ def render_app() -> None:
         <div class="igt-hero">
             <h1>✨ I GOT THIS.</h1>
             <h4>24 hours. A hundred things to remember. Let’s make “What’s next?” the easy part.</h4>
-            <p>School. Kids. Home. Learning. Volunteering. Social plans. One place to remember what matters, what’s coming, and what still needs your attention.</p>
+            <p>School. Kids. Home. Learning. Volunteering. Social plans. Life. You keep living it. I Got This keeps track of it.</p>
         </div>
         """,
         unsafe_allow_html=True,

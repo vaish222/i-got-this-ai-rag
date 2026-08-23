@@ -470,7 +470,7 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "<h1>✨ I GOT THIS.</h1>" in item.value
-                and "<h3>Hi," in item.value
+                and "<h4>24 hours." in item.value
                 for item in app.markdown
             )
         )
@@ -527,7 +527,11 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         )
         rendered_answer = [item.value for item in app.chat_message[1].markdown]
         self.assertIn("**🎉 Social**", rendered_answer)
-        self.assertIn(previous_response.answer, rendered_answer)
+        self.assertIn(
+            "The neighborhood potluck still needs a response.",
+            rendered_answer,
+        )
+        self.assertNotIn("[S1]", "\n".join(rendered_answer))
 
     def test_answer_items_render_as_pastel_category_cards(self) -> None:
         response = AnswerView(
@@ -583,8 +587,81 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         ):
             self.assertIn(label, rendered)
         self.assertIn("Here is what needs attention:", rendered)
-        self.assertIn("- The school field trip form is due Friday [S1].", rendered)
-        self.assertIn("- Buy the family birthday gift [S7].", rendered)
+        self.assertIn("- The school field trip form is due Friday.", rendered)
+        self.assertIn("- Buy the family birthday gift.", rendered)
+        self.assertNotIn("[S", "\n".join(rendered))
+        for index, category in enumerate(
+            (
+                "School",
+                "Activities",
+                "Household",
+                "Learning",
+                "Volunteer",
+                "Social",
+                "Family",
+            ),
+            start=1,
+        ):
+            self.assertIn(f"**Source {index}: {category}**", rendered)
+
+    def test_uncited_section_bullets_inherit_household_card_context(self) -> None:
+        response = AnswerView(
+            question="What should I prepare for this weekend?",
+            retrieval_question="What should I prepare for this weekend?",
+            answer=(
+                "Here is what needs attention:\n\n"
+                "**Saturday - August 22nd:** [S1]\n"
+                "- **HVAC Service:** Check the system before the visit.\n"
+                "- **Library Returns:** Put the due books in the car.\n"
+                "- **Meal Prep:** Bake the lemon bars.\n\n"
+                "**Sunday - August 23rd:** [S2]\n"
+                "- **Family Potluck:** Pack the lemon bars and serving spatula."
+            ),
+            sources=(
+                SourceView(
+                    label="S1",
+                    title="Home Tasks and Maintenance",
+                    source_path="data/sample/household/home_tasks.md",
+                    page_number=None,
+                ),
+                SourceView(
+                    label="S2",
+                    title="Children's Weekend Classes",
+                    source_path="data/sample/activities/weekend_classes.md",
+                    page_number=None,
+                ),
+            ),
+            used_conversation_context=False,
+        )
+        app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
+        app.session_state["conversation"] = [response]
+
+        app.run(timeout=20)
+
+        self.assertEqual(app.exception, [])
+        rendered = [item.value for item in app.chat_message[1].markdown]
+        household_blocks = [
+            value
+            for value in rendered
+            if "HVAC Service" in value or "Library Returns" in value
+        ]
+        self.assertEqual(len(household_blocks), 1)
+        self.assertIn("HVAC Service", household_blocks[0])
+        self.assertIn("Library Returns", household_blocks[0])
+        self.assertIn("Meal Prep", household_blocks[0])
+        self.assertIn("**🏠 Household**", rendered)
+        self.assertIn("**🎉 Social**", rendered)
+        self.assertIn("**Saturday - August 22nd:**", rendered)
+        self.assertIn("**Sunday - August 23rd:**", rendered)
+        self.assertNotIn("[S", "\n".join(rendered))
+        self.assertIn(
+            "**Source 1: Home Tasks and Maintenance**",
+            rendered,
+        )
+        self.assertIn(
+            "**Source 2: Children's Weekend Classes**",
+            rendered,
+        )
 
     def test_clarification_response_does_not_show_missing_source_notice(self) -> None:
         clarification = AnswerView(
