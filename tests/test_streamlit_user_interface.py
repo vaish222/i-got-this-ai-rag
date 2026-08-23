@@ -26,6 +26,7 @@ from i_got_this_rag.conversation import (  # noqa: E402
     ConversationTurn,
 )
 from i_got_this_rag.user_interface import (  # noqa: E402
+    CLARIFICATION_TEXT,
     AnswerView,
     answer_question,
     build_weekly_agenda_answer,
@@ -493,9 +494,53 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             previous_response.answer,
         )
 
+    def test_clarification_response_does_not_show_missing_source_notice(self) -> None:
+        clarification = AnswerView(
+            question="what's next?",
+            retrieval_question="what's next?",
+            answer=CLARIFICATION_TEXT,
+            sources=(),
+            used_conversation_context=False,
+        )
+        app = AppTest.from_file(PROJECT_ROOT / "app.py").run(timeout=20)
+        app.session_state["conversation"] = [clarification]
+
+        app.run(timeout=20)
+
+        self.assertEqual(app.exception, [])
+        self.assertIn(
+            CLARIFICATION_TEXT,
+            [item.value for item in app.chat_message[1].markdown],
+        )
+        self.assertNotIn(
+            "No source could be safely attributed to this response.",
+            [item.value for item in app.caption],
+        )
+
     def test_empty_question_is_rejected_without_calling_pipeline(self) -> None:
         with self.assertRaisesRegex(ValueError, "Enter a question"):
             normalize_question("  \n  ")
+
+    def test_underspecified_question_asks_for_clarification_without_retrieval(
+        self,
+    ) -> None:
+        pipeline = FakePipeline(REFUSAL_TEXT)
+
+        response = answer_question(pipeline, "what's next?")
+
+        self.assertEqual(response.answer, CLARIFICATION_TEXT)
+        self.assertIn("more specific", response.answer)
+        self.assertIn("schedule", response.answer)
+        self.assertEqual(response.sources, ())
+        self.assertEqual(pipeline.questions, [])
+
+    def test_specific_next_question_still_uses_retrieval(self) -> None:
+        pipeline = FakePipeline("The field trip form is due Friday [S1].")
+
+        response = answer_question(pipeline, "What's next for the field trip?")
+
+        self.assertEqual(response.answer, "The field trip form is due Friday [S1].")
+        self.assertEqual(pipeline.questions, [response.question, response.question])
 
     def test_answer_view_contains_only_cited_sources(self) -> None:
         pipeline = FakePipeline(

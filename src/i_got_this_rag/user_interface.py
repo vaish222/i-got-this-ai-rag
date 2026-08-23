@@ -17,6 +17,14 @@ from .conversation import (
 from .evaluation import extract_citations, serialize_retrieval
 
 
+CLARIFICATION_TEXT = (
+    "Can you be more specific about what you’re looking for? For example, are you "
+    "asking about your schedule, deadlines, invitations, gifts, or volunteer work?"
+)
+UNDERSPECIFIED_QUESTION_PATTERN = re.compile(
+    r"^(?:what(?:'|’)s next|what is next|what else|what should i know)\s*[?!.]*$",
+    re.IGNORECASE,
+)
 ANONYMOUS_IDENTIFIER_PATTERN = re.compile(
     r"`?(?P<identifier>"
     r"(?:adult|child|friend|relative|neighbor|mentee|coordinator|colleague)"
@@ -709,6 +717,10 @@ def normalize_question(question: str) -> str:
     return normalized
 
 
+def is_underspecified_question(question: str) -> bool:
+    return bool(UNDERSPECIFIED_QUESTION_PATTERN.fullmatch(question.strip()))
+
+
 def answer_question(
     pipeline: QuestionAnsweringPipeline,
     question: str,
@@ -728,6 +740,14 @@ def answer_question(
             used_history=False,
             raw_output=None,
             guard_repairs=(),
+        )
+    if is_underspecified_question(rewrite.retrieval_question):
+        return AnswerView(
+            question=normalized,
+            retrieval_question=rewrite.retrieval_question,
+            answer=CLARIFICATION_TEXT,
+            sources=(),
+            used_conversation_context=rewrite.used_history,
         )
     results = pipeline.retrieve(rewrite.retrieval_question)
     if reference_date is None:

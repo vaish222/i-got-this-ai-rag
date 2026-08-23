@@ -25,7 +25,11 @@ from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     load_experiment_dashboard,
 )
 from i_got_this_rag.settings import Settings  # noqa: E402
-from i_got_this_rag.user_interface import AnswerView, answer_question  # noqa: E402
+from i_got_this_rag.user_interface import (  # noqa: E402
+    CLARIFICATION_TEXT,
+    AnswerView,
+    answer_question,
+)
 
 
 COMPARISON_PATH = (
@@ -58,6 +62,8 @@ def connect_pipeline() -> BaselineRAG:
 
 
 def render_sources(response: AnswerView) -> None:
+    if response.answer == CLARIFICATION_TEXT:
+        return
     if not response.sources:
         st.caption("No source could be safely attributed to this response.")
         return
@@ -395,7 +401,7 @@ def render_app() -> None:
         <div class="igt-hero">
             <h1>✨ I GOT THIS. What’s next?</h1>
             <h2>Hi, {name}!</h2>
-            <p>Your command center for family plans, promises, and everything in between.It helps turn that daily mental clutter into one clear view of what matters now, what’s coming next, and what still needs attention</p>
+            <p>Your command center for family plans, promises, and everything in between. It helps turn that daily mental clutter into one clear view of what matters now, what’s coming next, and what still needs attention.</p>
         </div>
         """,
         unsafe_allow_html=True,
