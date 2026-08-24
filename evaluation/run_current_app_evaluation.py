@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import sys
@@ -41,9 +42,27 @@ OUTPUT_PATH = (
 )
 SOURCE_PATHS = (
     PROJECT_ROOT / "app.py",
+    PROJECT_ROOT / "src" / "i_got_this_rag" / "answer_routing.py",
+    PROJECT_ROOT / "src" / "i_got_this_rag" / "baseline.py",
     PROJECT_ROOT / "src" / "i_got_this_rag" / "user_interface.py",
     PROJECT_ROOT / "src" / "i_got_this_rag" / "conversation.py",
+    PROJECT_ROOT / "src" / "i_got_this_rag" / "settings.py",
 )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Evaluate the answer path used by the Streamlit application."
+    )
+    parser.add_argument(
+        "--ui-regressions-only",
+        action="store_true",
+        help=(
+            "Refresh only the deterministic UI regression section in an existing "
+            "results artifact."
+        ),
+    )
+    return parser.parse_args()
 
 
 def file_record(path: Path) -> dict[str, str]:
@@ -55,6 +74,7 @@ def file_record(path: Path) -> dict[str, str]:
 
 
 def main() -> None:
+    args = parse_args()
     load_dotenv(PROJECT_ROOT / ".env", override=True)
     settings = Settings.from_environment(PROJECT_ROOT)
     dataset = load_evaluation_dataset(QUESTIONS_PATH)
@@ -62,6 +82,34 @@ def main() -> None:
 
     print("Connecting the current Streamlit dense pipeline...")
     pipeline = BaselineRAG(settings, answer_style=PLAIN_LANGUAGE_ANSWER_STYLE)
+    if args.ui_regressions_only:
+        if not OUTPUT_PATH.is_file():
+            raise FileNotFoundError(
+                "Run the full current-app evaluation before refreshing regressions."
+            )
+        print("Refreshing corrected-behavior regression scenarios...")
+        payload = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
+        payload["completed_at"] = utc_now()
+        payload["evaluation_version"] = CURRENT_APP_EVALUATION_VERSION
+        payload["experiment_id"] = CURRENT_APP_EXPERIMENT_ID
+        payload["source_code"] = [file_record(path) for path in SOURCE_PATHS]
+        payload["active_runtime_settings"] = settings.public_config()
+        payload["ui_regressions"] = evaluate_ui_regressions(pipeline)
+        payload["partial_refresh"] = {
+            "ui_regressions_only": True,
+            "metrics_preserved_from_completed_full_run": True,
+        }
+        OUTPUT_PATH.write_text(
+            json.dumps(payload, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        regressions = payload["ui_regressions"]
+        print(
+            f"UI regressions: {regressions['passed_count']}/"
+            f"{regressions['case_count']} passed"
+        )
+        print(f"Results: {OUTPUT_PATH}")
+        return
     print("Running the current app over the 15 Phase 10 questions...")
     evaluation = evaluate_current_app(pipeline, dataset)
     print("Running corrected-behavior regression scenarios...")
@@ -78,9 +126,9 @@ def main() -> None:
         "experiment_name": "Current Streamlit app end-to-end evaluation",
         "completed_at": utc_now(),
         "mechanism": (
-            "Selected dense Top-5 retrieval followed by the current Streamlit "
-            "answer routing, deterministic handlers, citations, humanization, and "
-            "conversation guards."
+            "Unchanged dense Top-5 retrieval retained for Recall@5, followed by "
+            "high-confidence domain-scoped answer evidence, deterministic handlers, "
+            "citations, humanization, and conversation guards."
         ),
         "evaluation_dataset": {
             "path": QUESTIONS_PATH.relative_to(PROJECT_ROOT).as_posix(),

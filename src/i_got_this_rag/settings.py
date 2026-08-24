@@ -11,6 +11,10 @@ from .chat_models import (
     API_STYLE_OPENAI_COMPATIBLE,
     ChatModelConfig,
 )
+from .answer_routing import (
+    ANSWER_ROUTING_MODES,
+    ANSWER_ROUTING_SCOPED_REQUERY,
+)
 from .grounded_generation import GENERATION_MODE_STRICT_FILTER, GENERATION_MODES
 
 
@@ -37,6 +41,7 @@ class Settings:
     llm_base_url: str = "http://localhost:11434"
     llm_timeout_seconds: float = 30.0
     llm_max_output_tokens: int | None = None
+    answer_routing_mode: str = ANSWER_ROUTING_SCOPED_REQUERY
 
     @classmethod
     def from_environment(cls, project_root: Path) -> "Settings":
@@ -86,6 +91,10 @@ class Settings:
                 if os.getenv("LLM_MAX_OUTPUT_TOKENS", "").strip()
                 else None
             ),
+            answer_routing_mode=os.getenv(
+                "RAG_ANSWER_ROUTING_MODE",
+                ANSWER_ROUTING_SCOPED_REQUERY,
+            ).strip(),
         )
         settings.validate()
         return settings
@@ -109,6 +118,11 @@ class Settings:
         if self.generation_mode not in GENERATION_MODES:
             supported = ", ".join(sorted(GENERATION_MODES))
             raise ValueError(f"RAG_GENERATION_MODE must be one of: {supported}.")
+        if self.answer_routing_mode not in ANSWER_ROUTING_MODES:
+            supported = ", ".join(sorted(ANSWER_ROUTING_MODES))
+            raise ValueError(
+                f"RAG_ANSWER_ROUTING_MODE must be one of: {supported}."
+            )
         self.chat_model_config().validate()
 
     @property

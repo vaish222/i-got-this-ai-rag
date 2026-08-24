@@ -37,6 +37,10 @@ DOMAIN_TERMS: dict[str, tuple[str, ...]] = {
     "household": (
         "household",
         "meal plan",
+        "meal prep",
+        "meal preparation",
+        "meal schedule",
+        "menu",
         "dinner",
         "grocer",
         "home",
@@ -67,7 +71,7 @@ EVENT_TERMS: dict[str, tuple[str, ...]] = {
     "field_trip": ("field trip", "science center"),
     "graduation": ("graduation",),
     "invitation": ("invitation", "rsvp", "reply", "response"),
-    "meal": ("meal", "dinner", "breakfast", "lunch", "food", "potluck"),
+    "meal": ("meal", "menu", "dinner", "breakfast", "lunch", "food", "potluck"),
     "school_event": ("school", "picture day", "field trip", "back-to-school"),
     "volunteer_work": ("volunteer", "mentor", "mentoring", "welcome table", "donat"),
 }
@@ -115,6 +119,25 @@ MONTH_NUMBERS = {
     "dec": 12,
 }
 
+MARKDOWN_HEADING_PATTERN = re.compile(r"^(?P<marks>#{1,6})\s+(?P<label>.+?)\s*$")
+MARKDOWN_BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(?P<body>.+?)\s*$")
+MARKDOWN_TABLE_DELIMITER_PATTERN = re.compile(
+    r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$"
+)
+FIELD_BULLET_PATTERN = re.compile(
+    r"^\s*[-*+]\s+(?P<field>[A-Za-z][A-Za-z /_-]{0,40}):\s*(?P<value>.+)$"
+)
+PERIOD_ANCHOR_PATTERN = re.compile(
+    r"\b(?:beginning|starting)\s+(?:the\s+)?week\s+of\b|\bweek\s+beginning\b",
+    re.IGNORECASE,
+)
+RECURRENCE_PATTERN = re.compile(
+    r"\b(?:recurring|daily|weekly|Monday\s+through\s+Friday)\b|"
+    r"\b(?:every|each)\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|"
+    r"Saturday|Sunday|weekday|weekend|day|week)\b",
+    re.IGNORECASE,
+)
+
 
 class QuestionConstraints(BaseModel):
     people: tuple[str, ...] = ()
@@ -140,6 +163,14 @@ class GroundedAnswerItem(BaseModel):
 class GroundedAnswerPayload(BaseModel):
     items: list[GroundedAnswerItem] = Field(default_factory=list)
     optional_suggestions: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _EvidenceRecord:
+    """One independently filterable fact or event inside a retrieved chunk."""
+
+    text: str
+    date_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -398,6 +429,271 @@ def _status_matches(document: Document, requested_status: str | None) -> bool:
     return any(term in text for term in STATUS_TERMS[requested_status])
 
 
+def _single_date_heading(label: str, reference: date) -> str:
+    """Return a heading only when it names one day, not a week/month range."""
+    if re.search(r"\d\s*[–—-]\s*\d|\b(?:week|month|summer|fall)\b", label, re.IGNORECASE):
+        return ""
+    dates = _dates_in_text(label, reference)
+    return label if len(dates) == 1 else ""
+
+
+def _atomic_evidence_records(document: Document, reference: date) -> tuple[_EvidenceRecord, ...]:
+    """Split a retrieved Markdown chunk into independently filterable records."""
+
+    lines = document.page_content.splitlines()
+    records: list[_EvidenceRecord] = []
+    heading_stack: dict[int, str] = {}
+    day_heading = ""
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+
+        heading = MARKDOWN_HEADING_PATTERN.match(stripped)
+        if heading is not None:
+            level = len(heading.group("marks"))
+            heading_stack = {
+                existing_level: value
+                for existing_level, value in heading_stack.items()
+                if existing_level < level
+            }
+            label = heading.group("label").strip()
+            heading_stack[level] = label
+            day_heading = _single_date_heading(label, reference)
+            index += 1
+            continue
+
+        if stripped.startswith("|"):
+            table_lines: list[str] = []
+            while index < len(lines) and lines[index].strip().startswith("|"):
+                table_lines.append(lines[index].strip())
+                index += 1
+            if len(table_lines) >= 2:
+                header = table_lines[0]
+                data_rows = [
+                    row
+                    for row in table_lines[1:]
+                    if not MARKDOWN_TABLE_DELIMITER_PATTERN.match(row)
+                ]
+                records.extend(
+                    _EvidenceRecord(
+                        text=f"{header}\n{row}",
+                        date_context=day_heading,
+                    )
+                    for row in data_rows
+                )
+            continue
+
+        if MARKDOWN_BULLET_PATTERN.match(stripped):
+            bullet_lines: list[str] = []
+            while index < len(lines) and MARKDOWN_BULLET_PATTERN.match(lines[index].strip()):
+                bullet_lines.append(lines[index].strip())
+                index += 1
+            field_matches = [FIELD_BULLET_PATTERN.match(line) for line in bullet_lines]
+            is_field_record = (
+                len(bullet_lines) >= 2
+                and all(match is not None for match in field_matches)
+                and any(
+                    match is not None
+                    and match.group("field").strip().casefold()
+                    in {"event", "date", "when", "rsvp", "gift status"}
+                    for match in field_matches
+                )
+            )
+            if is_field_record:
+                section_label = heading_stack[max(heading_stack)] if heading_stack else ""
+                parts = [f"## {section_label}"] if section_label else []
+                parts.extend(bullet_lines)
+                records.append(
+                    _EvidenceRecord(text="\n".join(parts), date_context=day_heading)
+                )
+            else:
+                records.extend(
+                    _EvidenceRecord(text=line, date_context=day_heading)
+                    for line in bullet_lines
+                )
+            continue
+
+        paragraph_lines = [stripped]
+        index += 1
+        while index < len(lines):
+            candidate = lines[index].strip()
+            if (
+                not candidate
+                or MARKDOWN_HEADING_PATTERN.match(candidate)
+                or MARKDOWN_BULLET_PATTERN.match(candidate)
+                or candidate.startswith("|")
+            ):
+                break
+            paragraph_lines.append(candidate)
+            index += 1
+        records.append(
+            _EvidenceRecord(
+                text=" ".join(paragraph_lines),
+                date_context=day_heading,
+            )
+        )
+
+    return tuple(record for record in records if record.text.strip())
+
+
+def _range_contains_weekday(start: date, end: date, weekday: int) -> bool:
+    first = start + timedelta(days=(weekday - start.weekday()) % 7)
+    return first <= end
+
+
+def _record_date_matches(
+    record: _EvidenceRecord,
+    constraints: QuestionConstraints,
+    reference: date,
+) -> bool:
+    if constraints.date_start is None or constraints.date_end is None:
+        return True
+
+    start = constraints.date_start
+    end = constraints.date_end
+    text = record.text
+    explicit_dates = _dates_in_text(text, reference)
+    context_dates = _dates_in_text(record.date_context, reference)
+    if any(start <= value <= end for value in (*explicit_dates, *context_dates)):
+        if start == end and PERIOD_ANCHOR_PATTERN.search(text):
+            return False
+        return True
+
+    # An explicit out-of-range date is authoritative. Only a true recurring
+    # item may also satisfy a later requested weekday.
+    if explicit_dates and not RECURRENCE_PATTERN.search(text):
+        return False
+
+    weekdays = {
+        match.group(1).casefold()
+        for match in WEEKDAY_PATTERN.finditer(text)
+    }
+    if not weekdays:
+        return False
+    weekday_numbers = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }
+    if not any(
+        _range_contains_weekday(start, end, weekday_numbers[name])
+        for name in weekdays
+    ):
+        return False
+
+    if explicit_dates and re.search(r"\b(?:beginning|starting)\b", text, re.IGNORECASE):
+        if min(explicit_dates) > end:
+            return False
+    if PERIOD_ANCHOR_PATTERN.search(text) and not RECURRENCE_PATTERN.search(text):
+        return False
+    return True
+
+
+def _record_people_match(
+    record: _EvidenceRecord,
+    document: Document,
+    people: tuple[str, ...],
+) -> bool:
+    if not people or "whole household" in people:
+        return True
+    text = record.text.casefold()
+    has_child = bool(
+        re.search(
+            r"\b(?:child|kid|student|grade|elementary|middle[- ]school)\b|child_\d{2}",
+            text,
+        )
+    )
+    has_adult = bool(re.search(r"\b(?:adult|mentor|mentee)\b|adult_\d{2}", text))
+    if "children" in people and "requesting adult" not in people:
+        if has_adult and not has_child:
+            return False
+        if has_child:
+            return True
+    if "requesting adult" in people and "children" not in people:
+        if has_child and not has_adult:
+            return False
+        if has_adult:
+            return True
+
+    metadata_person = str(document.metadata.get("person", "")).casefold()
+    if not metadata_person:
+        # Missing person metadata is unknown, not a proven mismatch. Domain and
+        # date constraints still apply, and the strict prompt enforces person.
+        return True
+    if "children" in people:
+        return bool(re.search(r"child_\d{2}|\b(?:child|kid|student)\b", metadata_person))
+    if "requesting adult" in people:
+        return bool(re.search(r"adult_\d{2}|\badult\b", metadata_person))
+    return True
+
+
+def narrow_results_to_question_constraints(
+    results: list[tuple[Document, float]],
+    constraints: QuestionConstraints,
+    reference_date: str | date,
+) -> list[tuple[Document, float]]:
+    """Narrow unchanged Top-K chunks to matching rows/items before generation."""
+
+    if (
+        constraints.date_start is None
+        or constraints.date_end is None
+        or constraints.date_start != constraints.date_end
+    ):
+        return results
+    reference = _reference_date(reference_date)
+    narrowed: list[tuple[Document, float]] = []
+    for document, score in results:
+        if constraints.domains:
+            metadata_domain = str(document.metadata.get("domain", "")).casefold()
+            if metadata_domain:
+                if metadata_domain not in constraints.domains:
+                    continue
+            elif not _domain_matches(document, constraints.domains):
+                continue
+        matching_records: list[str] = []
+        seen: set[str] = set()
+        for record in _atomic_evidence_records(document, reference):
+            if not _record_date_matches(record, constraints, reference):
+                continue
+            if not _record_people_match(record, document, constraints.people):
+                continue
+            candidate = Document(
+                page_content=record.text,
+                metadata=dict(document.metadata),
+            )
+            if not _event_matches(candidate, constraints.event_task_type):
+                continue
+            if not _status_matches(candidate, constraints.requested_status):
+                continue
+            normalized = re.sub(r"\s+", " ", record.text).strip().casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            matching_records.append(
+                f"## {record.date_context}\n{record.text}"
+                if record.date_context
+                else record.text
+            )
+        if matching_records:
+            narrowed.append(
+                (
+                    Document(
+                        page_content="\n\n".join(matching_records),
+                        metadata=dict(document.metadata),
+                    ),
+                    score,
+                )
+            )
+    return narrowed
+
+
 def filter_relevant_results(
     results: list[tuple[Document, float]],
     constraints: QuestionConstraints,
@@ -407,6 +703,12 @@ def filter_relevant_results(
     selected: list[tuple[int, Document, float]] = []
     decisions: list[RelevanceDecision] = []
     for rank, (document, score) in enumerate(results, start=1):
+        narrowed = narrow_results_to_question_constraints(
+            [(document, score)],
+            constraints,
+            reference_date,
+        )
+        narrowed_document = narrowed[0][0] if narrowed else None
         failures: list[str] = []
         if not _domain_matches(document, constraints.domains):
             failures.append("domain")
@@ -418,9 +720,15 @@ def filter_relevant_results(
             failures.append("event_or_task_type")
         if not _status_matches(document, constraints.requested_status):
             failures.append("requested_status")
+        if (
+            constraints.date_start is not None
+            and constraints.date_end is not None
+            and narrowed_document is None
+        ):
+            failures.append("item_level_constraints")
         included = not failures
         if included:
-            selected.append((rank, document, score))
+            selected.append((rank, narrowed_document or document, score))
         decisions.append(
             RelevanceDecision(
                 source_id=f"S{rank}",

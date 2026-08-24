@@ -8,6 +8,7 @@ from typing import Any, Sequence
 from langchain_core.documents import Document
 
 from .baseline import REFUSAL_TEXT
+from .answer_routing import ANSWER_ROUTING_CURRENT, detect_answer_scope
 from .chat_models import (
     ChatModelConfigurationError,
     MissingChatModelAPIKeyError,
@@ -34,8 +35,8 @@ from .user_interface import (
 )
 
 
-CURRENT_APP_EVALUATION_VERSION = "phase10-current-app-v2"
-CURRENT_APP_EXPERIMENT_ID = "E803_phase10_current_app"
+CURRENT_APP_EVALUATION_VERSION = "phase10-current-app-v3"
+CURRENT_APP_EXPERIMENT_ID = "E804_phase10_scoped_answer_routing"
 BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
 CORRECTNESS_STOP_WORDS = {
     "a", "an", "and", "are", "at", "be", "by", "for", "from", "has",
@@ -52,11 +53,23 @@ class CapturingPipeline:
         self.settings = pipeline.settings
         self.resources = pipeline.resources
         self.last_results: list[tuple[Document, float]] = []
+        self.last_scoped_results: list[tuple[Document, float]] = []
         self.last_generation_trace: dict[str, Any] | None = None
 
     def retrieve(self, question: str) -> list[tuple[Document, float]]:
         self.last_results = self.pipeline.retrieve(question)
         return self.last_results
+
+    def retrieve_scoped(
+        self,
+        question: str,
+        scope: Any,
+    ) -> list[tuple[Document, float]]:
+        retrieve_scoped = getattr(self.pipeline, "retrieve_scoped", None)
+        if not callable(retrieve_scoped):
+            return []
+        self.last_scoped_results = retrieve_scoped(question, scope)
+        return self.last_scoped_results
 
     def generate(
         self,
@@ -156,10 +169,18 @@ def _selected_results(
     pipeline: CapturingPipeline,
     response: AnswerView,
 ) -> list[tuple[Document, float]]:
+    answer_scope = detect_answer_scope(response.retrieval_question)
+    candidate_results = pipeline.last_scoped_results or pipeline.last_results
     return select_relevant_ui_results(
         response.retrieval_question,
-        pipeline.last_results,
+        candidate_results,
         pipeline.settings.reference_date,
+        answer_scope=answer_scope,
+        answer_routing_mode=getattr(
+            pipeline.settings,
+            "answer_routing_mode",
+            ANSWER_ROUTING_CURRENT,
+        ),
     )
 
 
@@ -175,6 +196,7 @@ def evaluate_current_app(
 
     for question in dataset.questions:
         captured.last_results = []
+        captured.last_scoped_results = []
         captured.last_generation_trace = None
         started = perf_counter()
         generation_error: dict[str, str] | None = None
@@ -197,11 +219,12 @@ def evaluate_current_app(
             )
         total_latency = perf_counter() - started
         results = _selected_results(captured, response)
+        raw_retrieved_chunks = serialize_retrieval(captured.last_results)
         retrieved_chunks = serialize_retrieval(results)
         expected_ids = [str(value) for value in question["expected_source_ids"]]
         source_ranks, best_rank, recall_at_5 = expected_source_metrics(
             expected_ids,
-            retrieved_chunks,
+            raw_retrieved_chunks,
         )
         faithfulness = scorer.score(
             answerable=bool(question["answerable"]),
@@ -223,8 +246,14 @@ def evaluate_current_app(
                 "expected_answer": str(question["expected_answer"]),
                 "expected_source_ids": expected_ids,
                 "retrieval_question": response.retrieval_question,
+                "raw_retrieved_chunks": raw_retrieved_chunks,
                 "retrieved_chunks": retrieved_chunks,
                 "retrieved_source_ids": [
+                    str(chunk.get("document_id"))
+                    for chunk in raw_retrieved_chunks
+                    if chunk.get("document_id") is not None
+                ],
+                "answer_context_source_ids": [
                     str(chunk.get("document_id"))
                     for chunk in retrieved_chunks
                     if chunk.get("document_id") is not None
@@ -395,8 +424,8 @@ def evaluate_ui_regressions(pipeline: Any) -> dict[str, Any]:
     question = "Which invitations still need an RSVP?"
     response, latency = ask(question)
     failures = []
-    if "2 invitations still need a response" not in response.answer:
-        failures.append("pending RSVP count is not two")
+    if "6 invitations still need a response" not in response.answer:
+        failures.append("pending RSVP count is not six")
     if "picture day" in response.answer.casefold():
         failures.append("RSVP answer includes an unrelated picture-day item")
     results.append(_case_result("UI002", question, response, failures, latency))
@@ -404,8 +433,8 @@ def evaluate_ui_regressions(pipeline: Any) -> dict[str, Any]:
     question = "Is there any volunteer work this week?"
     volunteer_response, latency = ask(question)
     failures = []
-    if "5 volunteer commitments" not in volunteer_response.answer:
-        failures.append("volunteer answer does not contain five commitments")
+    if "7 volunteer commitments" not in volunteer_response.answer:
+        failures.append("volunteer answer does not contain seven commitments")
     if "welcome table" not in volunteer_response.answer.casefold():
         failures.append("volunteer answer omits the welcome-table commitment")
     if "september 9" in volunteer_response.answer.casefold():

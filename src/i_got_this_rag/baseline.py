@@ -14,6 +14,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 
+from .answer_routing import AnswerScope
 from .chat_models import API_STYLE_OLLAMA, ChatModelConfig, get_chat_model
 from .grounded_generation import (
     GENERATION_MODE_CURRENT,
@@ -247,6 +248,20 @@ class BaselineRAG:
 
     def retrieve(self, question: str) -> list[tuple[Document, float]]:
         return self.vector_store.similarity_search_with_score(question, k=self.settings.top_k)
+
+    def retrieve_scoped(
+        self,
+        question: str,
+        scope: AnswerScope,
+    ) -> list[tuple[Document, float]]:
+        metadata_filter = scope.pinecone_filter()
+        if metadata_filter is None:
+            return self.retrieve(question)
+        return self.vector_store.similarity_search_with_score(
+            question,
+            k=self.settings.top_k,
+            filter=metadata_filter,
+        )
 
     def generate(
         self,

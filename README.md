@@ -105,11 +105,17 @@ RAG_TOP_K=5
 RAG_REFERENCE_DATE=2026-08-20
 RAG_TIMEZONE=America/Los_Angeles
 RAG_GENERATION_MODE=strict_prompt_filter
+RAG_ANSWER_ROUTING_MODE=scoped_requery
 ```
 
 `RAG_GENERATION_MODE` accepts `current`, `strict_prompt`, or
 `strict_prompt_filter`. The default application mode uses the strict grounded
 prompt with retrieved-context relevance filtering.
+
+`RAG_ANSWER_ROUTING_MODE` accepts `current`, `scoped`, or `scoped_requery`.
+The default preserves the original Top-5 retrieval for measurement, then runs a
+metadata-scoped answer query only for high-confidence domains such as meal plans,
+invitations, activities, school, learning, and volunteer work.
 
 `LLM_PROVIDER`, `LLM_API_STYLE`, `LLM_MODEL`, `LLM_API_KEY`, and `LLM_BASE_URL`
 configure generation independently of retrieval. `openai_compatible` can be used

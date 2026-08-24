@@ -32,6 +32,7 @@ from i_got_this_rag.ingestion import (  # noqa: E402
     corpus_fingerprint,
     load_corpus,
 )
+from i_got_this_rag.grounded_generation import GroundedGeneration  # noqa: E402
 from i_got_this_rag.settings import Settings  # noqa: E402
 
 
@@ -160,7 +161,8 @@ def main() -> None:
     results = pipeline.retrieve(question)
     retrieval_latency = perf_counter() - retrieval_started
     generation_started = perf_counter()
-    answer = pipeline.generate(question, results)
+    generated = pipeline.generate(question, results)
+    answer = generated.answer if isinstance(generated, GroundedGeneration) else generated
     generation_latency = perf_counter() - generation_started
     serialized_results = serialize_retrieval(results)
 

@@ -30,6 +30,7 @@ from i_got_this_rag.user_interface import (  # noqa: E402
     AnswerView,
     SourceView,
     build_dated_meal_plan_answer,
+    build_dated_volunteer_answer,
     WEEKLY_AGENDA_EMPTY_TEXT,
     answer_question,
     build_weekly_agenda_answer,
@@ -902,6 +903,51 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertNotIn("September 9", selected[0][0].page_content)
         self.assertNotIn("August 24", selected[1][0].page_content)
         self.assertIn("Sunday's neighborhood potluck", selected[1][0].page_content)
+
+    def test_dated_volunteer_answer_renders_filtered_monday_and_tuesday_items(self) -> None:
+        monday_results = [
+            (
+                Document(
+                    page_content=(
+                        "`adult_02` agreed to draft the newsletter. The 250-word "
+                        "draft is due Monday, August 24 at noon."
+                    ),
+                    metadata={"document_id": "volunteer_002", "domain": "volunteer"},
+                ),
+                0.9,
+            )
+        ]
+        tuesday_results = [
+            (
+                Document(
+                    page_content=(
+                        "- Tuesday, 6:00–7:30 PM — `ai_team_01`: mentor a team "
+                        "building an AI document assistant. The current blocker is "
+                        "inconsistent citations."
+                    ),
+                    metadata={"document_id": "volunteer_001", "domain": "volunteer"},
+                ),
+                0.88,
+            )
+        ]
+
+        monday = build_dated_volunteer_answer(
+            monday_results,
+            "Is there any volunteer work on Monday?",
+            "2026-08-20",
+        )
+        tuesday = build_dated_volunteer_answer(
+            tuesday_results,
+            "Is there any volunteer work on Tuesday?",
+            "2026-08-20",
+        )
+
+        self.assertIn("Yes. Volunteer work for **Monday, August 24**", monday)
+        self.assertIn("draft is due Monday, August 24 at noon [S1]", monday)
+        self.assertIn("Yes. Volunteer work for **Tuesday, August 25**", tuesday)
+        self.assertIn("Tuesday, 6:00–7:30 PM", tuesday)
+        self.assertNotIn("current blocker", tuesday.casefold())
+        self.assertNotIn("_01", humanize_anonymous_identifiers(tuesday))
 
     def test_weekly_agenda_is_deduplicated_and_uses_calendar_dates(self) -> None:
         results = [

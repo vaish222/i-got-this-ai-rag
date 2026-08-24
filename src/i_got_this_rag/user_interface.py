@@ -7,6 +7,13 @@ from typing import Protocol, Sequence
 
 from langchain_core.documents import Document
 
+from .answer_routing import (
+    ANSWER_ROUTING_CURRENT,
+    ANSWER_ROUTING_SCOPED_REQUERY,
+    AnswerScope,
+    detect_answer_scope,
+    filter_results_to_scope,
+)
 from .agentic_rag import CitationAttributor
 from .baseline import REFUSAL_TEXT
 from .conversation import (
@@ -15,7 +22,12 @@ from .conversation import (
     ConversationTurn,
 )
 from .evaluation import extract_citations, serialize_retrieval
-from .grounded_generation import GroundedAnswerItem, GroundedGeneration
+from .grounded_generation import (
+    GroundedAnswerItem,
+    GroundedGeneration,
+    extract_question_constraints,
+    narrow_results_to_question_constraints,
+)
 
 
 CLARIFICATION_TEXT = (
@@ -32,7 +44,8 @@ UNDERSPECIFIED_QUESTION_PATTERN = re.compile(
 )
 ANONYMOUS_IDENTIFIER_PATTERN = re.compile(
     r"`?(?P<identifier>"
-    r"(?:adult|child|friend|relative|neighbor|mentee|coordinator|colleague)"
+    r"(?:adult|child|friend|relative|neighbor|mentee|coordinator|colleague|"
+    r"ai_team|web_team|automation_team)"
     r"(?:(?:_|\s+)[a-z]+)*(?:_|\s+)\d{2})`?"
     r"(?P<possessive>['’]s)?",
     re.IGNORECASE,
@@ -45,6 +58,10 @@ IDENTIFIER_ALIASES = {
     "friend_child_01": "your friend's child",
     "friend_family_02": "your friends",
     "relative_01": "your relative",
+    "coordinator_01": "the volunteer coordinator",
+    "ai_team_01": "the AI project team",
+    "web_team_01": "the web project team",
+    "automation_team_01": "the automation project team",
 }
 ROLE_ALIASES = {
     "adult": "an adult in your household",
@@ -58,6 +75,9 @@ ROLE_ALIASES = {
     "mentee": "your mentee",
     "coordinator": "the coordinator",
     "colleague": "your colleague",
+    "ai_team": "the AI project team",
+    "web_team": "the web project team",
+    "automation_team": "the automation project team",
 }
 EVENT_HEADING_ALIASES = {
     "friend_family_02 dinner": "Dinner with your friends",
@@ -82,6 +102,7 @@ PENDING_RSVP_PATTERN = re.compile(
     re.IGNORECASE,
 )
 RSVP_QUESTION_PATTERN = re.compile(r"\brsvp(?:s|ed|ing)?\b", re.IGNORECASE)
+GIFT_QUESTION_PATTERN = re.compile(r"\bgifts?\b", re.IGNORECASE)
 MARKDOWN_SECTION_PATTERN = re.compile(
     r"^##\s+(?P<heading>.+?)\s*$\n(?P<body>.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL,
@@ -97,7 +118,11 @@ VOLUNTEER_QUESTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 MEAL_PLAN_QUESTION_PATTERN = re.compile(
-    r"\b(?:meal\s+plan|dinner|what\s+(?:are\s+we|should\s+we)\s+eat)\b",
+    r"\b(?:meal\s+(?:plan|prep|preparation|schedule)|menu|"
+    r"dinner\s+(?:plan|menu|for)|"
+    r"what(?:'|’)s\s+for\s+(?:breakfast|lunch|dinner)|"
+    r"what\s+is\s+(?:the\s+)?dinner\s+(?:plan\s+)?(?:for|on)|"
+    r"what\s+(?:are\s+we|should\s+we)\s+eat)\b",
     re.IGNORECASE,
 )
 THIS_WEEK_PATTERN = re.compile(
@@ -121,6 +146,11 @@ SCHEDULE_BULLET_PATTERN = re.compile(r"^\s*[-*+]\s+(?P<item>.+?)\s*$")
 MEAL_PLAN_ROW_PATTERN = re.compile(
     r"^\|\s*(?P<day>[^|]+?)\s*\|\s*(?P<dinner>[^|]+?)\s*\|"
     r"\s*(?P<note>[^|]+?)\s*\|\s*$",
+    re.IGNORECASE,
+)
+GIFT_TRACKER_ROW_PATTERN = re.compile(
+    r"^\|\s*(?P<person>[^|]+?)\s*\|\s*(?P<celebration>[^|]+?)\s*\|"
+    r"\s*(?P<status>[^|]+?)\s*\|\s*(?P<action>[^|]+?)\s*\|\s*$",
     re.IGNORECASE,
 )
 SCHEDULE_LEADING_IDENTIFIER_PATTERN = re.compile(
@@ -239,6 +269,21 @@ class MealPlanItem:
     source_label: str
 
 
+@dataclass(frozen=True)
+class PendingGiftItem:
+    person: str
+    celebration: str
+    status: str
+    action: str
+    source_label: str
+
+
+@dataclass(frozen=True)
+class DatedVolunteerItem:
+    description: str
+    source_label: str
+
+
 def _reference_date(value: str | date | None) -> date | None:
     if isinstance(value, date):
         return value
@@ -305,8 +350,14 @@ def select_relevant_ui_results(
     question: str,
     results: list[tuple[Document, float]],
     reference_date: str | date | None = None,
+    *,
+    answer_scope: AnswerScope | None = None,
+    answer_routing_mode: str = ANSWER_ROUTING_CURRENT,
 ) -> list[tuple[Document, float]]:
     selected = results
+    scope = answer_scope or detect_answer_scope(question)
+    if answer_routing_mode != ANSWER_ROUTING_CURRENT:
+        selected = filter_results_to_scope(selected, scope)
     if VOLUNTEER_QUESTION_PATTERN.search(question):
         volunteer_results = [
             (document, score)
@@ -320,7 +371,24 @@ def select_relevant_ui_results(
             selected = volunteer_results
 
     reference = _reference_date(reference_date)
-    if reference is None or not THIS_WEEK_PATTERN.search(question):
+    if reference is None:
+        return selected
+
+    constraints = extract_question_constraints(question, reference)
+    if (
+        constraints.date_start is not None
+        and constraints.date_end is not None
+        and constraints.date_start == constraints.date_end
+    ):
+        # Retrieval remains unchanged. Only the evidence shown to generation is
+        # narrowed so a matching chunk cannot leak facts from a different day.
+        return narrow_results_to_question_constraints(
+            selected,
+            constraints,
+            reference,
+        )
+
+    if not THIS_WEEK_PATTERN.search(question):
         return selected
 
     filtered: list[tuple[Document, float]] = []
@@ -355,6 +423,95 @@ def is_volunteer_week_question(question: str) -> bool:
         VOLUNTEER_QUESTION_PATTERN.search(question)
         and THIS_WEEK_PATTERN.search(question)
     )
+
+
+def _requested_volunteer_date(
+    question: str,
+    reference_date: str | date | None,
+) -> date | None:
+    reference = _reference_date(reference_date)
+    if reference is None or not VOLUNTEER_QUESTION_PATTERN.search(question):
+        return None
+    constraints = extract_question_constraints(question, reference)
+    if (
+        constraints.date_start is None
+        or constraints.date_end is None
+        or constraints.date_start != constraints.date_end
+    ):
+        return None
+    return constraints.date_start
+
+
+def is_dated_volunteer_question(
+    question: str,
+    reference_date: str | date | None,
+) -> bool:
+    return _requested_volunteer_date(question, reference_date) is not None
+
+
+def _concise_volunteer_description(text: str, requested_date: date) -> str:
+    content_lines = [
+        line.strip().removeprefix("-").strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    content = " ".join(content_lines)
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", content)
+        if sentence.strip()
+    ]
+    weekday = requested_date.strftime("%A").casefold()
+    dated = [
+        sentence
+        for sentence in sentences
+        if weekday in sentence.casefold()
+        or requested_date in _explicit_dates(sentence, requested_date)
+    ]
+    selected = dated[0] if dated else (sentences[0] if sentences else content)
+    return _clean_markdown_value(selected).rstrip(".;")
+
+
+def build_dated_volunteer_answer(
+    results: list[tuple[Document, float]],
+    question: str,
+    reference_date: str | date | None,
+) -> str:
+    requested_date = _requested_volunteer_date(question, reference_date)
+    if requested_date is None:
+        return REFUSAL_TEXT
+
+    items: list[DatedVolunteerItem] = []
+    seen: set[str] = set()
+    for rank, (document, _) in enumerate(results, start=1):
+        domain = str(document.metadata.get("domain", "")).casefold()
+        document_id = str(document.metadata.get("document_id", "")).casefold()
+        if domain != "volunteer" and not document_id.startswith("volunteer_"):
+            continue
+        for block in re.split(r"\n\s*\n", document.page_content):
+            description = _concise_volunteer_description(block, requested_date)
+            normalized = re.sub(r"\W+", " ", description.casefold()).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            items.append(
+                DatedVolunteerItem(
+                    description=description,
+                    source_label=f"S{rank}",
+                )
+            )
+
+    if not items:
+        return REFUSAL_TEXT
+    date_label = f"{requested_date.strftime('%A, %B')} {requested_date.day}"
+    yes_prefix = "Yes. " if re.match(
+        r"^\s*(?:is|are|do|does|did|has|have|can|could|will)\b",
+        question,
+        re.IGNORECASE,
+    ) else ""
+    lines = [f"{yes_prefix}Volunteer work for **{date_label}**:", ""]
+    lines.extend(f"- {item.description} [{item.source_label}]" for item in items)
+    return "\n".join(lines)
 
 
 def is_weekly_agenda_question(question: str) -> bool:
@@ -459,6 +616,71 @@ def build_dated_meal_plan_answer(
         f"- **Dinner:** {item.dinner} [{item.source_label}]\n"
         f"- **Preparation:** {item.preparation_note} [{item.source_label}]"
     )
+
+
+def is_pending_gift_question(question: str) -> bool:
+    lowered = question.casefold()
+    return bool(GIFT_QUESTION_PATTERN.search(question)) and any(
+        marker in lowered
+        for marker in ("still", "need", "needed", "not purchased", "which")
+    )
+
+
+def _is_gift_tracker(document: Document) -> bool:
+    document_type = str(document.metadata.get("document_type", "")).casefold()
+    document_id = str(document.metadata.get("document_id", "")).casefold()
+    source_path = str(document.metadata.get("source_path", "")).casefold()
+    return (
+        document_type == "gift_tracker"
+        or document_id == "social_002"
+        or source_path.endswith("/social/birthdays_and_gifts.md")
+    )
+
+
+def build_pending_gift_answer(
+    results: list[tuple[Document, float]],
+) -> str | None:
+    items: list[PendingGiftItem] = []
+    seen: set[tuple[str, str]] = set()
+    for rank, (document, _) in enumerate(results, start=1):
+        if not _is_gift_tracker(document):
+            continue
+        for raw_line in document.page_content.splitlines():
+            row = GIFT_TRACKER_ROW_PATTERN.match(raw_line.strip())
+            if row is None:
+                continue
+            status = _clean_markdown_value(row.group("status"))
+            if (
+                status.casefold()
+                in {"gift status", "purchased", "complete", "completed"}
+                or re.fullmatch(r":?-{3,}:?", status) is not None
+            ):
+                continue
+            person = _clean_markdown_value(row.group("person"))
+            celebration = _clean_markdown_value(row.group("celebration"))
+            key = (person.casefold(), celebration.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(
+                PendingGiftItem(
+                    person=person,
+                    celebration=celebration,
+                    status=status,
+                    action=_clean_markdown_value(row.group("action")),
+                    source_label=f"S{rank}",
+                )
+            )
+    if not items:
+        return None
+    noun = "birthday" if len(items) == 1 else "birthdays"
+    lines = [f"{len(items)} {noun} still need gift attention:", ""]
+    for item in items:
+        lines.append(
+            f"- **{item.person}** — {item.celebration}. Gift status: "
+            f"{item.status}. {item.action}. [{item.source_label}]"
+        )
+    return "\n".join(lines)
 
 
 def _is_family_calendar(document: Document) -> bool:
@@ -874,21 +1096,48 @@ def answer_question(
             sources=(),
             used_conversation_context=rewrite.used_history,
         )
-    results = pipeline.retrieve(rewrite.retrieval_question)
     if reference_date is None:
         reference_date = getattr(
             getattr(pipeline, "settings", None),
             "reference_date",
             None,
         )
+    routing_mode = getattr(
+        getattr(pipeline, "settings", None),
+        "answer_routing_mode",
+        ANSWER_ROUTING_CURRENT,
+    )
+    answer_scope = detect_answer_scope(rewrite.retrieval_question)
+    raw_results = pipeline.retrieve(rewrite.retrieval_question)
+    candidate_results = raw_results
+    scoped_requery_used = False
+    if (
+        routing_mode == ANSWER_ROUTING_SCOPED_REQUERY
+        and answer_scope.is_high_confidence
+    ):
+        retrieve_scoped = getattr(pipeline, "retrieve_scoped", None)
+        if callable(retrieve_scoped):
+            scoped_results = retrieve_scoped(
+                rewrite.retrieval_question,
+                answer_scope,
+            )
+            if scoped_results:
+                candidate_results = scoped_results
+                scoped_requery_used = True
     results = select_relevant_ui_results(
         rewrite.retrieval_question,
-        results,
+        candidate_results,
         reference_date,
+        answer_scope=answer_scope,
+        answer_routing_mode=routing_mode,
     )
     structured_generation: GroundedGeneration | None = None
     if is_pending_rsvp_question(rewrite.retrieval_question):
         generated_answer = build_pending_rsvp_answer(results)
+    elif is_pending_gift_question(rewrite.retrieval_question):
+        generated_answer = build_pending_gift_answer(results)
+        if generated_answer is None:
+            generated_answer = REFUSAL_TEXT
     elif is_dated_meal_plan_question(
         rewrite.retrieval_question,
         reference_date,
@@ -900,6 +1149,15 @@ def answer_question(
         )
         if generated_answer is None:
             generated_answer = MEAL_PLAN_EMPTY_TEXT
+    elif is_dated_volunteer_question(
+        rewrite.retrieval_question,
+        reference_date,
+    ):
+        generated_answer = build_dated_volunteer_answer(
+            results,
+            rewrite.retrieval_question,
+            reference_date,
+        )
     elif is_volunteer_week_question(rewrite.retrieval_question):
         generated_answer = build_volunteer_week_answer(
             normalized,
@@ -964,6 +1222,26 @@ def answer_question(
             )
         )
 
+    routing_trace: dict[str, object] = {
+        "mode": routing_mode,
+        "scope": answer_scope.trace(),
+        "raw_result_count": len(raw_results),
+        "answer_result_count": len(results),
+        "scoped_requery_used": scoped_requery_used,
+        "raw_document_ids": [
+            str(document.metadata.get("document_id", ""))
+            for document, _ in raw_results
+        ],
+        "answer_document_ids": [
+            str(document.metadata.get("document_id", ""))
+            for document, _ in results
+        ],
+    }
+    generation_trace = (
+        structured_generation.trace() if structured_generation is not None else {}
+    )
+    generation_trace["answer_routing"] = routing_trace
+
     return AnswerView(
         question=normalized,
         retrieval_question=rewrite.retrieval_question,
@@ -978,7 +1256,5 @@ def answer_question(
             if structured_generation is not None
             else ()
         ),
-        generation_trace=(
-            structured_generation.trace() if structured_generation is not None else None
-        ),
+        generation_trace=generation_trace,
     )

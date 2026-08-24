@@ -19,6 +19,7 @@ from i_got_this_rag.grounded_generation import (  # noqa: E402
     extract_question_constraints,
     filter_relevant_results,
     generate_strict_grounded_answer,
+    narrow_results_to_question_constraints,
 )
 
 
@@ -123,6 +124,141 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertTrue(decisions[0].included)
         self.assertFalse(decisions[1].included)
         self.assertFalse(decisions[2].included)
+
+    def test_exact_day_filter_drops_week_anchor_and_keeps_monday_volunteer_task(self) -> None:
+        results = [
+            (
+                document(
+                    "volunteer",
+                    (
+                        "Beginning the week of Monday, August 24, mentoring totals "
+                        "five hours each week.\n\n"
+                        "- Tuesday, 6:00 PM — mentor the AI team.\n"
+                        "- Wednesday, 6:00 PM — mentor the web team."
+                    ),
+                    "volunteer_001",
+                ),
+                0.92,
+            ),
+            (
+                document(
+                    "volunteer",
+                    (
+                        "The 250-word newsletter draft is due Monday, "
+                        "August 24 at noon."
+                    ),
+                    "volunteer_002",
+                ),
+                0.89,
+            ),
+        ]
+        constraints = extract_question_constraints(
+            "What is the volunteer work for Monday?",
+            "2026-08-20",
+        )
+
+        narrowed = narrow_results_to_question_constraints(
+            results,
+            constraints,
+            "2026-08-20",
+        )
+
+        self.assertEqual(
+            [item.metadata["document_id"] for item, _ in narrowed],
+            ["volunteer_002"],
+        )
+        self.assertIn("due Monday, August 24 at noon", narrowed[0][0].page_content)
+        self.assertNotIn("Wednesday", narrowed[0][0].page_content)
+
+    def test_exact_day_filter_works_for_tables_and_recurring_activity_rows(self) -> None:
+        results = [
+            (
+                document(
+                    "household",
+                    (
+                        "| Day | Dinner | Preparation note |\n"
+                        "|---|---|---|\n"
+                        "| Monday, Aug 24 | Chana masala | Soak chickpeas Sunday |\n"
+                        "| Tuesday, Aug 25 | Hakka noodles | Chop vegetables |"
+                    ),
+                    "household_001",
+                ),
+                0.91,
+            ),
+            (
+                document(
+                    "activities",
+                    (
+                        "- Beginning Monday, August 24, child_01 has mathematics "
+                        "class every Monday and Wednesday from 4:00–5:00 PM.\n"
+                        "- Beginning Tuesday, August 25, child_01 has reading class "
+                        "every Tuesday and Thursday from 4:00–5:00 PM."
+                    ),
+                    "activities_001",
+                ),
+                0.88,
+            ),
+        ]
+
+        meal_constraints = extract_question_constraints(
+            "What is the meal plan for Monday?",
+            "2026-08-20",
+        )
+        meals = narrow_results_to_question_constraints(
+            results,
+            meal_constraints,
+            "2026-08-20",
+        )
+        self.assertEqual(len(meals), 1)
+        self.assertIn("Chana masala", meals[0][0].page_content)
+        self.assertNotIn("Hakka noodles", meals[0][0].page_content)
+
+        activity_constraints = extract_question_constraints(
+            "What kids activities are on Wednesday?",
+            "2026-08-20",
+        )
+        activities = narrow_results_to_question_constraints(
+            results,
+            activity_constraints,
+            "2026-08-20",
+        )
+        self.assertEqual(len(activities), 1)
+        self.assertIn("mathematics class", activities[0][0].page_content)
+        self.assertNotIn("reading class", activities[0][0].page_content)
+
+    def test_exact_day_filter_keeps_only_matching_invitation_record(self) -> None:
+        results = [
+            (
+                document(
+                    "social",
+                    (
+                        "## Neighborhood potluck\n"
+                        "- Event: Sunday, August 23, 5:00 PM\n"
+                        "- RSVP: pending\n\n"
+                        "## October birthday\n"
+                        "- Event: Sunday, October 4, 10:00 AM\n"
+                        "- RSVP: pending\n"
+                        "- RSVP deadline: Sunday, September 20"
+                    ),
+                    "social_001",
+                ),
+                0.93,
+            )
+        ]
+        constraints = extract_question_constraints(
+            "Which invitations need an RSVP on Sunday?",
+            "2026-08-20",
+        )
+
+        narrowed = narrow_results_to_question_constraints(
+            results,
+            constraints,
+            "2026-08-20",
+        )
+
+        self.assertEqual(len(narrowed), 1)
+        self.assertIn("Neighborhood potluck", narrowed[0][0].page_content)
+        self.assertNotIn("October birthday", narrowed[0][0].page_content)
 
     def test_empty_filtered_context_preserves_exact_refusal_without_llm_call(self) -> None:
         results = [
