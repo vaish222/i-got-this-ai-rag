@@ -498,15 +498,16 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             {button.label for button in app.button},
             {
                 "↻ New conversation",
-                "⏭️ What's coming up this week?",
                 "💌 Which invitations still need an RSVP?",
                 "🎒 What should I prepare for this weekend?",
                 "📅 Plan my week.",
+                "🍽️ What's for dinner tomorrow?",
             },
         )
         self.assertEqual([tab.label for tab in app.tabs], ["Ask", "Experiments"])
         subheaders = [item.value for item in app.subheader]
         self.assertIn("Latest: Qwen answer-quality optimization", subheaders)
+        self.assertNotIn("Generation model comparison", subheaders)
         self.assertNotIn("Previous app end-to-end", subheaders)
 
     def test_suggested_questions_remain_available_after_an_answer(self) -> None:
@@ -527,10 +528,10 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             {button.label for button in app.button},
             {
                 "↻ New conversation",
-                "⏭️ What's coming up this week?",
                 "💌 Which invitations still need an RSVP?",
                 "🎒 What should I prepare for this weekend?",
                 "📅 Plan my week.",
+                "🍽️ What's for dinner tomorrow?",
             },
         )
         self.assertEqual(len(app.chat_message), 2)

@@ -26,10 +26,8 @@ from i_got_this_rag.conversation import (  # noqa: E402
 )
 from i_got_this_rag.experiment_dashboard import (  # noqa: E402
     ExperimentDashboard,
-    GenerationModelDashboard,
     load_claim_faithfulness_audit,
     load_experiment_dashboard,
-    load_generation_model_dashboard,
     load_qwen_generation_comparison,
 )
 from i_got_this_rag.settings import Settings  # noqa: E402
@@ -47,9 +45,6 @@ COMPARISON_PATH = (
     / "phase10_final"
     / "comparison.json"
 )
-GENERATION_MODEL_COMPARISON_PATH = (
-    PROJECT_ROOT / "evaluation" / "results" / "generation_model_comparison.json"
-)
 CLAIM_FAITHFULNESS_AUDIT_PATH = (
     PROJECT_ROOT
     / "evaluation"
@@ -61,10 +56,10 @@ QWEN_GENERATION_COMPARISON_PATH = (
     PROJECT_ROOT / "evaluation" / "results" / "qwen_generation_comparison.json"
 )
 SUGGESTED_QUESTIONS = (
-    ("⏭️", "What's coming up this week?"),
     ("💌", "Which invitations still need an RSVP?"),
     ("🎒", "What should I prepare for this weekend?"),
     ("📅", "Plan my week."),
+    ("🍽️", "What's for dinner tomorrow?")
 )
 PENDING_PROMPT_KEY = "pending_prompt"
 ANSWER_CATEGORY_LABELS = {
@@ -469,15 +464,6 @@ def load_dashboard(path: str, modified_at_ns: int) -> ExperimentDashboard:
 
 
 @st.cache_data(show_spinner=False)
-def load_generation_model_results(
-    path: str,
-    modified_at_ns: int,
-) -> GenerationModelDashboard:
-    del modified_at_ns
-    return load_generation_model_dashboard(Path(path))
-
-
-@st.cache_data(show_spinner=False)
 def load_claim_audit_results(path: str, modified_at_ns: int) -> dict:
     del modified_at_ns
     return load_claim_faithfulness_audit(Path(path))
@@ -487,78 +473,6 @@ def load_claim_audit_results(path: str, modified_at_ns: int) -> dict:
 def load_qwen_generation_results(path: str, modified_at_ns: int) -> dict:
     del modified_at_ns
     return load_qwen_generation_comparison(Path(path))
-
-
-def render_generation_model_comparison() -> None:
-    st.divider()
-    st.subheader("Generation model comparison")
-    st.caption(
-        "Single-variable experiment: every model receives the same cached Top-5 "
-        "evidence and the same strict grounding prompt. Relevance filtering is off."
-    )
-    if not GENERATION_MODEL_COMPARISON_PATH.is_file():
-        st.info(
-            "No generation-model comparison is available yet. Run "
-            "`uv run python evaluation/run_generation_model_experiments.py` "
-            "to generate it."
-        )
-        return
-    try:
-        comparison = load_generation_model_results(
-            GENERATION_MODEL_COMPARISON_PATH.as_posix(),
-            GENERATION_MODEL_COMPARISON_PATH.stat().st_mtime_ns,
-        )
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        st.error(f"The generation-model comparison could not be loaded: {exc}")
-        return
-
-    st.dataframe(
-        [row.table_record() for row in comparison.rows],
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "Recall@5": st.column_config.NumberColumn(format="%.3f"),
-            "Faithfulness": st.column_config.NumberColumn(format="%.3f"),
-            "Relevance": st.column_config.NumberColumn(format="%.3f"),
-            "Refusal": st.column_config.NumberColumn(format="%.3f"),
-            "Avg. latency (s)": st.column_config.NumberColumn(format="%.3f"),
-            "P95 latency (s)": st.column_config.NumberColumn(format="%.3f"),
-        },
-    )
-
-    if comparison.eligible_experiment_ids:
-        faithfulness, relevance, latency, balance = st.columns(4)
-        faithfulness.markdown("**Highest faithfulness**")
-        faithfulness.write(
-            comparison.labels_for(comparison.highest_faithfulness_ids)
-        )
-        relevance.markdown("**Highest relevance/correctness**")
-        relevance.write(comparison.labels_for(comparison.highest_relevance_ids))
-        latency.markdown("**Lowest average latency**")
-        latency.write(comparison.labels_for(comparison.lowest_latency_ids))
-        balance.markdown("**Best overall balance**")
-        balance.write(comparison.labels_for(comparison.best_balance_ids))
-        st.caption(
-            "Overall balance is a multi-metric comparison, not an automatic model "
-            f"recommendation. {comparison.balance_method}"
-        )
-    else:
-        st.warning(
-            "No model is eligible for highlights. A run must complete without "
-            "generation failures and preserve correct refusal at 1.000."
-        )
-
-    failed_rows = [
-        row for row in comparison.rows if row.run_status != "complete"
-    ]
-    if failed_rows:
-        with st.expander("Model configuration and API failures"):
-            for row in failed_rows:
-                error = row.configuration_error or {}
-                st.write(
-                    f"**{row.label}:** {error.get('message', row.run_status)}"
-                )
-    st.caption(f"Model comparison completed: {comparison.completed_at}")
 
 
 def render_claim_faithfulness_audit() -> None:
@@ -973,7 +887,6 @@ def render_experiment_dashboard() -> None:
     )
     st.caption(f"Comparison completed: {dashboard.completed_at}")
 
-    render_generation_model_comparison()
     render_claim_faithfulness_audit()
 
 
