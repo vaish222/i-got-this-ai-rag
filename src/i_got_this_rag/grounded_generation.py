@@ -15,10 +15,12 @@ REFUSAL_TEXT = "I couldn't find that information in your knowledge base."
 GENERATION_MODE_CURRENT = "current"
 GENERATION_MODE_STRICT = "strict_prompt"
 GENERATION_MODE_STRICT_FILTER = "strict_prompt_filter"
+GENERATION_MODE_CONCISE = "concise_relevance"
 GENERATION_MODES = {
     GENERATION_MODE_CURRENT,
     GENERATION_MODE_STRICT,
     GENERATION_MODE_STRICT_FILTER,
+    GENERATION_MODE_CONCISE,
 }
 
 DOMAIN_TERMS: dict[str, tuple[str, ...]] = {

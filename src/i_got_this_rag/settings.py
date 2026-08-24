@@ -49,6 +49,7 @@ class Settings:
         raw_data_dir = Path(os.getenv("RAG_DATA_DIR", "data/sample")).expanduser()
         data_dir = raw_data_dir if raw_data_dir.is_absolute() else project_root / raw_data_dir
         llm_provider = os.getenv("LLM_PROVIDER", "ollama").strip()
+        provider_is_nebius = llm_provider.casefold() == "nebius"
         llm_api_style = os.getenv(
             "LLM_API_STYLE",
             API_STYLE_OLLAMA
@@ -69,7 +70,11 @@ class Settings:
             embedding_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "embeddinggemma"),
             chat_model=os.getenv(
                 "LLM_MODEL",
-                os.getenv("OLLAMA_CHAT_MODEL", "gemma3:1b"),
+                (
+                    os.getenv("NEBIUS_MODEL_1", "Qwen/Qwen3-30B-A3B-Instruct-2507")
+                    if provider_is_nebius
+                    else os.getenv("OLLAMA_CHAT_MODEL", "gemma3:1b")
+                ),
             ),
             ollama_base_url=ollama_base_url,
             chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "500")),
@@ -83,9 +88,24 @@ class Settings:
             ),
             llm_provider=llm_provider,
             llm_api_style=llm_api_style,
-            llm_api_key=os.getenv("LLM_API_KEY", ""),
-            llm_base_url=os.getenv("LLM_BASE_URL", ollama_base_url).rstrip("/"),
-            llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+            llm_api_key=os.getenv(
+                "LLM_API_KEY",
+                os.getenv("NEBIUS_API_KEY", "") if provider_is_nebius else "",
+            ),
+            llm_base_url=os.getenv(
+                "LLM_BASE_URL",
+                (
+                    os.getenv(
+                        "NEBIUS_BASE_URL",
+                        "https://api.tokenfactory.nebius.com/v1/",
+                    )
+                    if provider_is_nebius
+                    else ollama_base_url
+                ),
+            ).rstrip("/"),
+            llm_timeout_seconds=float(
+                os.getenv("LLM_TIMEOUT_SECONDS", "60" if provider_is_nebius else "30")
+            ),
             llm_max_output_tokens=(
                 int(os.environ["LLM_MAX_OUTPUT_TOKENS"])
                 if os.getenv("LLM_MAX_OUTPUT_TOKENS", "").strip()

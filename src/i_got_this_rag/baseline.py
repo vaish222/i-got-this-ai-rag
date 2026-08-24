@@ -17,6 +17,7 @@ from pinecone import Pinecone, ServerlessSpec
 from .answer_routing import AnswerScope
 from .chat_models import API_STYLE_OLLAMA, ChatModelConfig, get_chat_model
 from .grounded_generation import (
+    GENERATION_MODE_CONCISE,
     GENERATION_MODE_CURRENT,
     GENERATION_MODE_STRICT,
     GENERATION_MODE_STRICT_FILTER,
@@ -277,6 +278,28 @@ class BaselineRAG:
                 results,
                 answer_style=self.answer_style,
             )
+        if self.generation_mode == GENERATION_MODE_CONCISE:
+            # Imported lazily because concise_generation uses lexical helpers
+            # from retrieval.py, which also supports the baseline pipeline.
+            from .concise_generation import (
+                EVIDENCE_MODE_ALL,
+                PROMPT_MODE_CONCISE,
+                AnswerLengthPolicy,
+                generate_qwen_experiment_answer,
+            )
+
+            generated = generate_qwen_experiment_answer(
+                llm=self.resources.llm,
+                question=question,
+                results=results,
+                reference_date=self.settings.reference_date,
+                timezone=self.settings.timezone,
+                prompt_mode=PROMPT_MODE_CONCISE,
+                evidence_mode=EVIDENCE_MODE_ALL,
+                length_policy=AnswerLengthPolicy(),
+            )
+            self.last_generation_trace = generated.trace()
+            return generated
         generated = generate_strict_grounded_answer(
             llm=self.resources.llm,
             question=question,
