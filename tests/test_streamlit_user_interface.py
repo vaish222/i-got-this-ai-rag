@@ -1120,6 +1120,54 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertNotIn("Monday, August 24", response.answer)
         self.assertNotIn("invented school event", response.answer)
 
+    def test_weekly_agenda_rolls_forward_from_sunday_and_excludes_past(self) -> None:
+        results = [
+            (
+                Document(
+                    page_content="""# Family Schedule
+
+## Sunday, August 23
+
+- 10:00 AM — old event
+
+## Monday, August 24
+
+- 8:45 AM–2:15 PM — `child_02`: science-center field trip
+
+## Sunday, August 30
+
+- 11:59 PM — `adult_01`: Week 3 assignment due
+
+## Future vacations
+
+### Labor Day weekend
+
+- Travel dates: September 4–7""",
+                    metadata={
+                        "document_id": "family_001",
+                        "document_type": "family_calendar",
+                        "document_title": "Family Schedule",
+                        "chunk_id": "family_001::chunk_000",
+                        "source_path": "data/sample/family/family_schedule.md",
+                    },
+                ),
+                1.0,
+            )
+        ]
+
+        answer = build_weekly_agenda_answer(
+            results,
+            "2026-08-23",
+            "What's coming up this week?",
+        )
+
+        assert answer is not None
+        self.assertIn("Monday, August 24", answer)
+        self.assertIn("Sunday, August 30", answer)
+        self.assertNotIn("Sunday, August 23", answer)
+        self.assertNotIn("old event", answer)
+        self.assertNotIn("Travel dates", answer)
+
     def test_weekly_plan_without_calendar_items_does_not_generate(self) -> None:
         pipeline = FakePipeline("Invented weekly plan. [S1]")
 

@@ -328,8 +328,23 @@ def _week_bounds(reference: date) -> tuple[date, date]:
     return start, start + timedelta(days=6)
 
 
-def _filter_document_to_week(document: Document, reference: date) -> Document | None:
-    start, end = _week_bounds(reference)
+def _forward_week_bounds(reference: date) -> tuple[date, date]:
+    if reference.weekday() == 6:
+        start = reference + timedelta(days=1)
+        return start, start + timedelta(days=6)
+    _, end = _week_bounds(reference)
+    return reference, end
+
+
+def _filter_document_to_week(
+    document: Document,
+    reference: date,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> Document | None:
+    if start is None or end is None:
+        start, end = _forward_week_bounds(reference)
     blocks = re.split(r"\n\s*\n", document.page_content)
     kept_blocks: list[str] = []
     for block in blocks:
@@ -391,9 +406,16 @@ def select_relevant_ui_results(
     if not THIS_WEEK_PATTERN.search(question):
         return selected
 
+    range_start = constraints.date_start
+    range_end = constraints.date_end
     filtered: list[tuple[Document, float]] = []
     for document, score in selected:
-        narrowed = _filter_document_to_week(document, reference)
+        narrowed = _filter_document_to_week(
+            document,
+            reference,
+            start=range_start,
+            end=range_end,
+        )
         if narrowed is not None:
             filtered.append((narrowed, score))
     return filtered or selected
@@ -408,7 +430,11 @@ def filter_answer_to_current_week(
     if reference is None or not THIS_WEEK_PATTERN.search(question):
         return answer
 
-    start, end = _week_bounds(reference)
+    constraints = extract_question_constraints(question, reference)
+    start = constraints.date_start
+    end = constraints.date_end
+    if start is None or end is None:
+        start, end = _forward_week_bounds(reference)
     kept_lines: list[str] = []
     for line in answer.splitlines():
         dates = _explicit_dates(line, reference)
@@ -725,11 +751,16 @@ def _schedule_item_sort_key(item: WeeklyAgendaItem) -> tuple[date, int, int]:
 def _weekly_agenda_items(
     results: list[tuple[Document, float]],
     reference_date: str | date | None,
+    question: str = "this week",
 ) -> tuple[WeeklyAgendaItem, ...]:
     reference = _reference_date(reference_date)
     if reference is None:
         return ()
-    start, end = _week_bounds(reference)
+    constraints = extract_question_constraints(question, reference)
+    start = constraints.date_start
+    end = constraints.date_end
+    if start is None or end is None:
+        start, end = _forward_week_bounds(reference)
     items: list[WeeklyAgendaItem] = []
     seen: set[tuple[date, str]] = set()
     source_order = 0
@@ -740,7 +771,8 @@ def _weekly_agenda_items(
         current_date: date | None = None
         current_label: str | None = None
         for raw_line in document.page_content.splitlines():
-            heading = SCHEDULE_DAY_HEADING_PATTERN.match(raw_line.strip())
+            stripped_line = raw_line.strip()
+            heading = SCHEDULE_DAY_HEADING_PATTERN.match(stripped_line)
             if heading:
                 parsed_dates = _explicit_dates(heading.group("label"), reference)
                 candidate = parsed_dates[0] if parsed_dates else None
@@ -750,6 +782,10 @@ def _weekly_agenda_items(
                 else:
                     current_date = None
                     current_label = None
+                continue
+            if stripped_line.startswith("#"):
+                current_date = None
+                current_label = None
                 continue
 
             bullet = SCHEDULE_BULLET_PATTERN.match(raw_line)
@@ -787,8 +823,9 @@ def _weekly_agenda_items(
 def build_weekly_agenda_answer(
     results: list[tuple[Document, float]],
     reference_date: str | date | None,
+    question: str = "this week",
 ) -> str | None:
-    items = _weekly_agenda_items(results, reference_date)
+    items = _weekly_agenda_items(results, reference_date, question)
     if not items:
         return None
 
@@ -1124,6 +1161,12 @@ def answer_question(
             if scoped_results:
                 candidate_results = scoped_results
                 scoped_requery_used = True
+    if is_weekly_agenda_question(rewrite.retrieval_question):
+        retrieve_weekly_agenda = getattr(pipeline, "retrieve_weekly_agenda", None)
+        if callable(retrieve_weekly_agenda):
+            agenda_results = retrieve_weekly_agenda()
+            if agenda_results:
+                candidate_results = agenda_results
     results = select_relevant_ui_results(
         rewrite.retrieval_question,
         candidate_results,
@@ -1166,7 +1209,11 @@ def answer_question(
             reference_date,
         )
     elif is_weekly_agenda_question(rewrite.retrieval_question):
-        generated_answer = build_weekly_agenda_answer(results, reference_date)
+        generated_answer = build_weekly_agenda_answer(
+            results,
+            reference_date,
+            rewrite.retrieval_question,
+        )
         if generated_answer is None:
             generated_answer = WEEKLY_AGENDA_EMPTY_TEXT
     else:

@@ -4,7 +4,10 @@ import html
 import os
 import re
 import sys
+from dataclasses import replace
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -67,10 +70,10 @@ QWEN_GENERATION_COMPARISON_PATH = (
     PROJECT_ROOT / "evaluation" / "results" / "qwen_generation_comparison.json"
 )
 SUGGESTED_QUESTIONS = (
+    ("⏭️", "What's coming up this week?"),
     ("💌", "Which invitations still need an RSVP?"),
     ("🎒", "What should I prepare for this weekend?"),
     ("📅", "Plan my week."),
-    (("🍽️", "What's for dinner tomorrow?")),
 )
 PENDING_PROMPT_KEY = "pending_prompt"
 ANSWER_CATEGORY_LABELS = {
@@ -204,10 +207,23 @@ def display_name() -> str:
     return os.getenv("APP_USER_NAME", "").strip() or "there"
 
 
+def live_reference_date() -> str:
+    """Use today's date in the UI without changing reproducible eval dates."""
+    configured = os.getenv("APP_REFERENCE_DATE", "").strip()
+    if configured:
+        date.fromisoformat(configured)
+        return configured
+    timezone = ZoneInfo(os.getenv("RAG_TIMEZONE", "America/Los_Angeles"))
+    return datetime.now(timezone).date().isoformat()
+
+
 @st.cache_resource(show_spinner=False)
 def connect_pipeline() -> BaselineRAG:
     load_dotenv(PROJECT_ROOT / ".env", override=True)
-    settings = Settings.from_environment(PROJECT_ROOT)
+    settings = replace(
+        Settings.from_environment(PROJECT_ROOT),
+        reference_date=live_reference_date(),
+    )
     return BaselineRAG(settings, answer_style=PLAIN_LANGUAGE_ANSWER_STYLE)
 
 

@@ -250,6 +250,30 @@ class BaselineRAG:
     def retrieve(self, question: str) -> list[tuple[Document, float]]:
         return self.vector_store.similarity_search_with_score(question, k=self.settings.top_k)
 
+    def retrieve_weekly_agenda(self) -> list[tuple[Document, float]]:
+        """Load the canonical family calendar for deterministic UI agendas.
+
+        This UI-only path keeps benchmark retrieval unchanged and avoids
+        depending on whether a newly added calendar week is already in Pinecone.
+        """
+        from .ingestion import load_file
+
+        calendar_path = self.settings.data_dir / "family" / "family_schedule.md"
+        if not calendar_path.exists():
+            return []
+        documents = load_file(calendar_path, self.settings.project_root)
+        results: list[tuple[Document, float]] = []
+        for index, document in enumerate(documents):
+            metadata = dict(document.metadata)
+            metadata.setdefault("chunk_id", f"family_001::calendar_{index:03d}")
+            results.append(
+                (
+                    Document(page_content=document.page_content, metadata=metadata),
+                    1.0,
+                )
+            )
+        return results
+
     def retrieve_scoped(
         self,
         question: str,

@@ -82,6 +82,15 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertEqual(constraints.date_end, constraints.date_start)
         self.assertEqual(constraints.response_mode, "facts")
 
+    def test_this_week_rolls_forward_from_sunday(self) -> None:
+        constraints = extract_question_constraints(
+            "What's coming up this week?",
+            "2026-08-23",
+        )
+
+        self.assertEqual(constraints.date_start.isoformat(), "2026-08-24")
+        self.assertEqual(constraints.date_end.isoformat(), "2026-08-30")
+
     def test_relevance_filter_keeps_only_direct_kids_sunday_evidence(self) -> None:
         results = [
             (

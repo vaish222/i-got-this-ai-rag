@@ -1,6 +1,6 @@
 ---
 document_id: family_001
-document_title: Family Schedule — August 17–23, 2026
+document_title: Family Schedule — August 17–30, 2026
 domain: family
 document_type: family_calendar
 person: [adult_01, adult_02, child_01, child_02]
@@ -10,7 +10,7 @@ tags: [family, weekly_schedule, cross_domain, travel, vacation, long_weekend, bo
 updated_at: 2026-08-23
 ---
 
-# Family Schedule — August 17–23, 2026
+# Family Schedule — August 17–30, 2026
 
 Reference date: **Thursday, August 20, 2026**.
 
@@ -44,6 +44,63 @@ Reference date: **Thursday, August 20, 2026**.
 - 11:59 PM — `adult_01` Week 2 course assignment due
 
 There is a transportation overlap Saturday morning: `adult_02` is assigned to the HVAC visit while `adult_01` takes `child_01` to swimming.
+
+# Upcoming week — August 24–30, 2026
+
+## Monday, August 24
+
+- 8:45 AM–2:15 PM — `child_02`: Riverside Science Center field trip
+- Noon — `adult_02`: Safe Routes to School newsletter draft due
+- 4:00–5:00 PM — `child_01`: mathematics class
+- After school — `child_01` club interest forms due
+- Public-library books due; they are already in the car
+- `relative_01` birthday card must be mailed
+
+## Tuesday, August 25
+
+- 4:00–5:00 PM — `child_02`: taekwondo class
+- 4:00–5:00 PM — `child_01`: reading class
+- 5:30–6:30 PM — `child_01`: swim practice
+- 6:00–7:30 PM — `adult_01`: technical mentoring session with `ai_team_01`
+- 6:30–8:00 PM — Middle School Back-to-School Night for adults
+
+## Wednesday, August 26
+
+- 10:20 AM — `child_02`: elementary picture day
+- 4:00–5:00 PM — `child_01`: mathematics class
+- 5:00–5:45 PM — `child_02`: beginner ensemble
+- 6:00–7:30 PM — `adult_01`: technical mentoring session with `web_team_01`
+
+## Thursday, August 27
+
+- 3:20 PM — `child_01`: Student Council interest meeting
+- 4:00–5:00 PM — `child_02`: taekwondo class
+- 4:00–5:00 PM — `child_01`: reading class
+- 5:30–6:30 PM — `child_01`: swim practice
+- 6:00–7:30 PM — `adult_01`: technical mentoring session with `automation_team_01`
+- 7:00 PM — `adult_01`: Practical AI Week 3 live session
+
+## Friday, August 28
+
+- Noon — `child_01` fall sports registration deadline
+- 4:00–4:45 PM — `child_01`: singing lesson
+- 5:00–5:30 PM — `adult_01`: technical-mentor progress review; summary due at 5:30 PM
+- 6:30 PM — family dinner reservation at Curry Leaf Indian Kitchen
+- Recycling collection
+- `adult_01`: suggest two September coffee dates to `colleague_01`
+
+## Saturday, August 29
+
+- 8:30–11:00 AM — `child_01`: swim time trial
+- 10:30–11:15 AM — `child_02`: elementary swim lesson
+- 6:00 PM — dinner invitation from `friend_family_02`; RSVP was due August 24
+- Test household smoke alarms by today
+
+## Sunday, August 30
+
+- 10:00–11:15 AM — `child_02`: art class
+- 11:59 PM — `adult_01`: Practical AI Week 3 assignment due
+- Confirm the Lake Tahoe kayak reservation by today; it is not yet booked
 
 ## Future long-weekend vacations
 

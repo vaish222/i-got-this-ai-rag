@@ -263,6 +263,20 @@ def _week_bounds(reference: date) -> tuple[date, date]:
     return start, start + timedelta(days=6)
 
 
+def _forward_week_bounds(reference: date) -> tuple[date, date]:
+    """Return the future-facing week window used by live schedule questions.
+
+    During the week, "this week" means today through Sunday so past items are
+    never returned. On Sunday, there is no meaningful remainder, so the window
+    rolls forward to the next complete Monday-through-Sunday week.
+    """
+    if reference.weekday() == 6:
+        start = reference + timedelta(days=1)
+        return start, start + timedelta(days=6)
+    _, end = _week_bounds(reference)
+    return reference, end
+
+
 def _requested_dates(question: str, reference: date) -> tuple[date | None, date | None, str | None]:
     lowered = question.casefold()
     explicit = _dates_in_text(question, reference)
@@ -275,8 +289,12 @@ def _requested_dates(question: str, reference: date) -> tuple[date | None, date 
     if "this weekend" in lowered or "weekend" in lowered:
         start, _ = _week_bounds(reference)
         return start + timedelta(days=5), start + timedelta(days=6), "this weekend"
+    if re.search(r"\b(?:next|upcoming) week\b", lowered):
+        current_start, _ = _week_bounds(reference)
+        start = current_start + timedelta(days=7)
+        return start, start + timedelta(days=6), "next week"
     if re.search(r"\b(?:this|my|our|the) week\b|\bweek ahead\b|\bweekly\b", lowered):
-        start, end = _week_bounds(reference)
+        start, end = _forward_week_bounds(reference)
         return start, end, "this week"
     weekday = WEEKDAY_PATTERN.search(question)
     if weekday:
