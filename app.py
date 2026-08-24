@@ -67,10 +67,10 @@ QWEN_GENERATION_COMPARISON_PATH = (
     PROJECT_ROOT / "evaluation" / "results" / "qwen_generation_comparison.json"
 )
 SUGGESTED_QUESTIONS = (
-    ("⏭️", "What's coming up this week?"),
     ("💌", "Which invitations still need an RSVP?"),
     ("🎒", "What should I prepare for this weekend?"),
     ("📅", "Plan my week."),
+    (("🍽️", "What's for dinner tomorrow?")),
 )
 PENDING_PROMPT_KEY = "pending_prompt"
 ANSWER_CATEGORY_LABELS = {
