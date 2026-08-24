@@ -25,11 +25,9 @@ from i_got_this_rag.conversation import (  # noqa: E402
     ConversationTurn,
 )
 from i_got_this_rag.experiment_dashboard import (  # noqa: E402
-    CurrentAppBenchmark,
     ExperimentDashboard,
     GenerationModelDashboard,
     load_claim_faithfulness_audit,
-    load_current_app_benchmark,
     load_experiment_dashboard,
     load_generation_model_dashboard,
     load_qwen_generation_comparison,
@@ -48,13 +46,6 @@ COMPARISON_PATH = (
     / "results"
     / "phase10_final"
     / "comparison.json"
-)
-CURRENT_APP_RESULTS_PATH = (
-    PROJECT_ROOT
-    / "evaluation"
-    / "results"
-    / "phase10_current_app"
-    / "results.json"
 )
 GENERATION_MODEL_COMPARISON_PATH = (
     PROJECT_ROOT / "evaluation" / "results" / "generation_model_comparison.json"
@@ -475,12 +466,6 @@ def render_answer_content(response: AnswerView, response_index: int) -> None:
 def load_dashboard(path: str, modified_at_ns: int) -> ExperimentDashboard:
     del modified_at_ns
     return load_experiment_dashboard(Path(path))
-
-
-@st.cache_data(show_spinner=False)
-def load_current_app_results(path: str, modified_at_ns: int) -> CurrentAppBenchmark:
-    del modified_at_ns
-    return load_current_app_benchmark(Path(path))
 
 
 @st.cache_data(show_spinner=False)
@@ -990,86 +975,6 @@ def render_experiment_dashboard() -> None:
 
     render_generation_model_comparison()
     render_claim_faithfulness_audit()
-
-    st.divider()
-    st.subheader("Previous app end-to-end")
-    st.caption(
-        "Measured through the same answer path used by the Ask tab after the "
-        "conversation, citation, deduplication, and plain-language corrections."
-    )
-    if not CURRENT_APP_RESULTS_PATH.is_file():
-        st.info(
-            "No current-app benchmark is available yet. Run "
-            "`uv run python evaluation/run_current_app_evaluation.py` to generate it."
-        )
-        return
-
-    try:
-        current = load_current_app_results(
-            CURRENT_APP_RESULTS_PATH.as_posix(),
-            CURRENT_APP_RESULTS_PATH.stat().st_mtime_ns,
-        )
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        st.error(f"The current-app benchmark could not be loaded: {exc}")
-        return
-
-    recall, faithfulness, refusal, latency = st.columns(4)
-    recall.metric(
-        "Current Recall@5",
-        f"{current.recall_at_5:.3f}",
-        f"{current.recall_delta:+.3f} vs historical baseline",
-    )
-    faithfulness.metric(
-        "Current faithfulness",
-        f"{current.faithfulness:.3f}",
-        f"{current.faithfulness_delta:+.3f} vs historical baseline",
-    )
-    refusal.metric("Correct refusal", f"{current.correct_refusal_rate:.3f}")
-    latency.metric(
-        "Current average latency",
-        f"{current.average_latency_seconds:.3f}s",
-        f"{current.average_latency_delta_seconds:+.3f}s vs historical baseline",
-        delta_color="inverse",
-    )
-    st.dataframe(
-        [current.table_record()],
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "Recall@5": st.column_config.NumberColumn(format="%.3f"),
-            "Faithfulness": st.column_config.NumberColumn(format="%.3f"),
-            "Correct refusal": st.column_config.NumberColumn(format="%.3f"),
-            "Avg. latency (s)": st.column_config.NumberColumn(format="%.3f"),
-            "P95 latency (s)": st.column_config.NumberColumn(format="%.3f"),
-        },
-    )
-    regression_summary = (
-        f"Corrected-behavior checks: {current.regression_passed_count}/"
-        f"{current.regression_case_count} passed."
-    )
-    if current.regression_pass_rate == 1.0:
-        st.success(regression_summary)
-    else:
-        st.warning(regression_summary)
-    with st.expander("Inspect corrected-behavior checks"):
-        st.dataframe(
-            [
-                {
-                    "Case": item["case_id"],
-                    "Question": item["question"],
-                    "Passed": bool(item["passed"]),
-                    "Failures": "; ".join(item["failures"]) or "None",
-                    "Latency (s)": float(item["latency_seconds"]),
-                }
-                for item in current.regression_cases
-            ],
-            hide_index=True,
-            width="stretch",
-            column_config={
-                "Latency (s)": st.column_config.NumberColumn(format="%.3f"),
-            },
-        )
-    st.caption(f"Current app measurement completed: {current.completed_at}")
 
 
 def render_chat_response(response: AnswerView, response_index: int) -> None:

@@ -505,6 +505,9 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
             },
         )
         self.assertEqual([tab.label for tab in app.tabs], ["Ask", "Experiments"])
+        subheaders = [item.value for item in app.subheader]
+        self.assertIn("Latest: Qwen answer-quality optimization", subheaders)
+        self.assertNotIn("Previous app end-to-end", subheaders)
 
     def test_suggested_questions_remain_available_after_an_answer(self) -> None:
         previous_response = AnswerView(
