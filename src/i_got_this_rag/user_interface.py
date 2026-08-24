@@ -27,6 +27,7 @@ from .grounded_generation import (
     GroundedGeneration,
     extract_question_constraints,
     narrow_results_to_question_constraints,
+    resolve_relative_date_for_retrieval,
 )
 
 
@@ -555,25 +556,13 @@ def _requested_meal_date(
     reference = _reference_date(reference_date)
     if reference is None or not MEAL_PLAN_QUESTION_PATTERN.search(question):
         return None
-
-    explicit_dates = _explicit_dates(question, reference)
-    if explicit_dates:
-        return explicit_dates[0]
-
-    weekday_match = WEEKDAY_PATTERN.search(question)
-    if weekday_match is None:
-        return None
-    weekday_number = {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
-    }[weekday_match.group(0).casefold()]
-    days_ahead = (weekday_number - reference.weekday()) % 7
-    return reference + timedelta(days=days_ahead)
+    constraints = extract_question_constraints(question, reference)
+    if (
+        constraints.date_start is not None
+        and constraints.date_start == constraints.date_end
+    ):
+        return constraints.date_start
+    return None
 
 
 def is_dated_meal_plan_question(
@@ -1145,7 +1134,15 @@ def answer_question(
         ANSWER_ROUTING_CURRENT,
     )
     answer_scope = detect_answer_scope(rewrite.retrieval_question)
-    raw_results = pipeline.retrieve(rewrite.retrieval_question)
+    retrieval_search_question = (
+        resolve_relative_date_for_retrieval(
+            rewrite.retrieval_question,
+            reference_date,
+        )
+        if reference_date is not None
+        else rewrite.retrieval_question
+    )
+    raw_results = pipeline.retrieve(retrieval_search_question)
     candidate_results = raw_results
     scoped_requery_used = False
     if (
@@ -1155,7 +1152,7 @@ def answer_question(
         retrieve_scoped = getattr(pipeline, "retrieve_scoped", None)
         if callable(retrieve_scoped):
             scoped_results = retrieve_scoped(
-                rewrite.retrieval_question,
+                retrieval_search_question,
                 answer_scope,
             )
             if scoped_results:
@@ -1272,6 +1269,7 @@ def answer_question(
     routing_trace: dict[str, object] = {
         "mode": routing_mode,
         "scope": answer_scope.trace(),
+        "retrieval_search_question": retrieval_search_question,
         "raw_result_count": len(raw_results),
         "answer_result_count": len(results),
         "scoped_requery_used": scoped_requery_used,

@@ -1228,6 +1228,79 @@ class StreamlitUserInterfaceTests(unittest.TestCase):
         self.assertNotIn("robotics", response.answer)
         self.assertEqual(len(response.sources), 1)
 
+    def test_tomorrow_meal_plan_uses_next_date_without_generation(self) -> None:
+        pipeline = FakePipeline("Vegetable tacos. [S1]")
+        pipeline.results = [
+            (
+                Document(
+                    page_content="""# Family Meal Plan
+
+| Day | Dinner | Preparation note |
+|---|---|---|
+| Thursday, Aug 20 | Vegetable tacos | Use avocados first |
+| Monday, Aug 24 | Chana masala, basmati rice, and cucumber raita | Soak chickpeas Sunday night or use two pantry cans |""",
+                    metadata={
+                        "document_id": "household_001",
+                        "document_type": "meal_plan",
+                        "document_title": "Family Meal Plan",
+                        "chunk_id": "household_001::chunk_001",
+                        "source_path": "data/sample/household/meal_plan.md",
+                    },
+                ),
+                0.97,
+            )
+        ]
+
+        response = answer_question(
+            pipeline,
+            "What's for dinner tomorrow?",
+            reference_date="2026-08-23",
+        )
+
+        self.assertEqual(pipeline.generation_results, [])
+        self.assertIn("Monday, August 24, 2026", pipeline.questions[0])
+        self.assertEqual(response.retrieval_question, "What's for dinner tomorrow?")
+        self.assertIn("Monday, August 24", response.answer)
+        self.assertIn("Chana masala", response.answer)
+        self.assertIn("Soak chickpeas", response.answer)
+        self.assertNotIn("Vegetable tacos", response.answer)
+        self.assertEqual(len(response.sources), 1)
+
+    def test_tomorrow_narrows_non_meal_domain_before_generation(self) -> None:
+        pipeline = FakePipeline("The science-center field trip is tomorrow [S1].")
+        pipeline.results = [
+            (
+                Document(
+                    page_content=(
+                        "The old school event was Thursday, August 20.\n\n"
+                        "The science-center field trip is Monday, August 24."
+                    ),
+                    metadata={
+                        "domain": "school",
+                        "document_id": "school_001",
+                        "document_type": "school_newsletter",
+                        "document_title": "Elementary School Newsletter",
+                        "chunk_id": "school_001::chunk_000",
+                        "source_path": "data/sample/school/elementary_newsletter.md",
+                    },
+                ),
+                0.95,
+            )
+        ]
+
+        response = answer_question(
+            pipeline,
+            "What school events are tomorrow?",
+            reference_date="2026-08-23",
+        )
+
+        self.assertIn("Monday, August 24, 2026", pipeline.questions[0])
+        self.assertEqual(pipeline.questions[1], "What school events are tomorrow?")
+        generation_context = pipeline.generation_results[0][0][0].page_content
+        self.assertIn("Monday, August 24", generation_context)
+        self.assertNotIn("Thursday, August 20", generation_context)
+        self.assertEqual(response.retrieval_question, "What school events are tomorrow?")
+
     def test_dated_meal_plan_builder_returns_none_without_requested_row(
         self,
     ) -> None:

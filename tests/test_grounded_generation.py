@@ -20,6 +20,7 @@ from i_got_this_rag.grounded_generation import (  # noqa: E402
     filter_relevant_results,
     generate_strict_grounded_answer,
     narrow_results_to_question_constraints,
+    resolve_relative_date_for_retrieval,
 )
 
 
@@ -90,6 +91,49 @@ class GroundedGenerationTests(unittest.TestCase):
 
         self.assertEqual(constraints.date_start.isoformat(), "2026-08-24")
         self.assertEqual(constraints.date_end.isoformat(), "2026-08-30")
+
+    def test_tomorrow_resolves_from_reference_date(self) -> None:
+        constraints = extract_question_constraints(
+            "What's for dinner tomorrow?",
+            "2026-08-23",
+        )
+
+        self.assertEqual(constraints.date_start.isoformat(), "2026-08-24")
+        self.assertEqual(constraints.date_end, constraints.date_start)
+        self.assertEqual(constraints.date_phrase, "tomorrow")
+
+    def test_tomorrow_resolves_consistently_across_domains(self) -> None:
+        questions = (
+            "What school events are tomorrow?",
+            "What kids activities are tomorrow?",
+            "What volunteer work is tomorrow?",
+            "What course work is due tomorrow?",
+            "What social events are tomorrow?",
+            "What household tasks are tomorrow?",
+            "What is on the family schedule tomorrow?",
+        )
+
+        for question in questions:
+            with self.subTest(question=question):
+                constraints = extract_question_constraints(question, "2026-08-23")
+                self.assertEqual(constraints.date_start.isoformat(), "2026-08-24")
+                self.assertEqual(constraints.date_end, constraints.date_start)
+
+    def test_relative_date_is_added_only_to_retrieval_query(self) -> None:
+        resolved = resolve_relative_date_for_retrieval(
+            "What volunteer work is tommorrow?",
+            "2026-08-23",
+        )
+
+        self.assertIn("Monday, August 24, 2026", resolved)
+        self.assertIn("2026-08-24", resolved)
+        self.assertEqual(
+            resolve_relative_date_for_retrieval(
+                "What volunteer work is Monday?",
+                "2026-08-23",
+            ),
+            "What volunteer work is Monday?",
+        )
 
     def test_relevance_filter_keeps_only_direct_kids_sunday_evidence(self) -> None:
         results = [

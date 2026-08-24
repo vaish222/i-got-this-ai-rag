@@ -94,6 +94,10 @@ WEEKDAY_PATTERN = re.compile(
     r"\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b",
     re.IGNORECASE,
 )
+RELATIVE_DATE_PATTERN = re.compile(
+    r"\b(?:day after tom+orrow|tom+orrow|today|tonight)\b",
+    re.IGNORECASE,
+)
 MONTH_NUMBERS = {
     "january": 1,
     "jan": 1,
@@ -282,6 +286,14 @@ def _requested_dates(question: str, reference: date) -> tuple[date | None, date 
     explicit = _dates_in_text(question, reference)
     if explicit:
         return explicit[0], explicit[-1], question
+    if re.search(r"\bday after tom+orrow\b", lowered):
+        requested = reference + timedelta(days=2)
+        return requested, requested, "day after tomorrow"
+    if re.search(r"\btom+orrow\b", lowered):
+        requested = reference + timedelta(days=1)
+        return requested, requested, "tomorrow"
+    if re.search(r"\b(?:today|tonight)\b", lowered):
+        return reference, reference, "today"
     if "next summer" in lowered:
         return date(reference.year + 1, 6, 1), date(reference.year + 1, 8, 31), "next summer"
     if "next year" in lowered:
@@ -389,6 +401,29 @@ def extract_question_constraints(
         requested_status=requested_status,
         response_mode="facts_and_optional_advice" if wants_advice else "facts",
     )
+
+
+def resolve_relative_date_for_retrieval(
+    question: str,
+    reference_date: str | date,
+) -> str:
+    """Add an explicit date to retrieval while preserving the user's question.
+
+    Generation and display continue to receive the original wording. The added
+    date only helps the unchanged retriever find records that store calendar
+    dates instead of relative words such as "tomorrow".
+    """
+    if not RELATIVE_DATE_PATTERN.search(question):
+        return question
+    constraints = extract_question_constraints(question, reference_date)
+    if (
+        constraints.date_start is None
+        or constraints.date_start != constraints.date_end
+    ):
+        return question
+    requested = constraints.date_start
+    label = f"{requested.strftime('%A, %B')} {requested.day}, {requested.year}"
+    return f"{question} Resolved requested date: {label} ({requested.isoformat()})."
 
 
 def _metadata_text(document: Document) -> str:
